@@ -12,7 +12,7 @@ Several people open the **client**; one computer runs the **server** that connec
 ## What it can do
 
 Accounts (name + password) · GroupChat · private chats with text and voice messages (saved, also for offline people), +1 … +9 notification badges · "Messages" list with previews ·
-images, files and voice messages · emoji · online/offline dots ·
+images, files (any size, with cancel) and voice messages in GroupChat and private chats · emoji · online/offline dots ·
 dark/light theme · blurred wallpapers you can add to · upload progress bar · AI helper hooks.
 
 ## The folders
@@ -111,3 +111,8 @@ Everything that travels is a **packet**: `type, sender, timestamp, metadata, [by
 
 Emoji pictures: **Noto Emoji** by Google, Apache License 2.0
 (https://github.com/googlefonts/noto-emoji). The logo and icons were drawn for this project.
+
+### Story – sending a file (any size, GroupChat or private chat)
+1. The Composer calls `ChatClient.sendFile(...)`. A background thread sends `TYPE_FILE_BEGIN` (who gets it, name, size), then the file in 256 KB pieces (`TYPE_FILE_CHUNK`), then `TYPE_FILE_END`. The **Cancel** button calls `Upload.cancel()`, which stops between two pieces and sends `FILE_END` = "cancelled".
+2. `ClientHandler.handleFileChunk` writes every piece straight to `chatter-data/files/<id>.part` (`FileStore`), so the server never holds the file in memory. When the file is complete it is renamed to `<id>` and a normal chat message is posted: text that starts with `ChatProtocol.FILE_MARK` followed by `id|kind|size|name` (saved in the history like any text; for GroupChat or only for the two people of a private chat).
+3. `ChatEntry` recognises that text as a stored file. The bubble shows a picture (loaded automatically if it is under 4 MB), a "Download" button or a "Play" button. Downloading sends `TYPE_FILE_GET`; the server streams the file back in pieces (`TYPE_FILE_DATA`) from its own thread, so chat messages keep flowing.

@@ -265,14 +265,16 @@ public class ChatServer {
         if (conversation.isEmpty()) {
             synchronized (groupHistory) {
                 for (StoredMessage message : groupHistory) {
-                    if (message.type == ChatProtocol.TYPE_TEXT) {
+                    if (message.type == ChatProtocol.TYPE_TEXT && !message.meta.startsWith(ChatProtocol.FILE_MARK)) {
                         lines.add(message.sender + ": " + message.meta);
                     }
                 }
             }
         } else {
             for (PrivateHistory.Message message : privateHistory.between(user, conversation, limit)) {
-                lines.add(message.sender + ": " + message.text);
+                if (!message.text.startsWith(ChatProtocol.FILE_MARK)) {
+                    lines.add(message.sender + ": " + message.text);
+                }
             }
         }
         return new ArrayList<String>(lines.subList(Math.max(0, lines.size() - limit), lines.size()));

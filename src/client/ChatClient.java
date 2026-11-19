@@ -6,14 +6,20 @@ import shared.Frames;
 import javax.swing.SwingUtilities;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.net.Socket;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class ChatClient implements AutoCloseable {
     private final Socket socket;
@@ -33,6 +39,10 @@ public final class ChatClient implements AutoCloseable {
         void onProgress(long sent, long total);
         void onComplete();
         void onFailure(IOException error);
+
+        /** The user cancelled the upload. */
+        default void onCancelled() {
+        }
     }
 
     /**
@@ -125,6 +135,14 @@ public final class ChatClient implements AutoCloseable {
             try {
                 while (!closed) {
                     byte type = input.readByte();
+                    if (type == ChatProtocol.TYPE_FILE_DATA) {
+                        receiveFileData();
+                        continue;
+                    }
+                    if (type == ChatProtocol.TYPE_FILE_DONE) {
+                        finishDownload();
+                        continue;
+                    }
                     String sender = input.readUTF();
                     String timestamp = input.readUTF();
                     String metadata = input.readUTF();
@@ -141,6 +159,10 @@ public final class ChatClient implements AutoCloseable {
                     SwingUtilities.invokeLater(() -> listener.onPacket(packet));
                 }
             } catch (IOException error) {
+                for (Download download : downloads.values()) { // nothing more will arrive for these
+                    SwingUtilities.invokeLater(() -> download.listener.onFailure(error));
+                }
+                downloads.clear();
                 if (!closed) {
                     SwingUtilities.invokeLater(() -> listener.onDisconnected(error));
                 }
@@ -178,16 +200,6 @@ public final class ChatClient implements AutoCloseable {
         }
     }
 
-    public void sendAudio(byte[] data) throws IOException {
-        synchronized (output) {
-            output.writeByte(ChatProtocol.TYPE_AUDIO);
-            output.writeUTF("voice_message.wav");
-            output.writeInt(data.length);
-            output.write(data);
-            output.flush();
-        }
-    }
-
     /** Tells everybody my status (a ChatProtocol.STATUS_* value). */
     public void sendStatus(int status) throws IOException {
         synchronized (output) {
@@ -207,59 +219,76 @@ public final class ChatClient implements AutoCloseable {
         }
     }
 
-    /** A voice message for one person (private chat). */
-    public void sendPrivateAudio(String recipient, byte[] data) throws IOException {
-        synchronized (output) {
-            output.writeByte(ChatProtocol.TYPE_PRIVATE_AUDIO);
-            output.writeUTF(recipient);
-            output.writeUTF("voice_message.wav");
-            output.writeInt(data.length);
-            output.write(data);
-            output.flush();
+    // ---------------------------------------------------------------- big files: upload, cancel, download
+    //
+    // A file is never sent as one big packet. It is cut into chunks of 256 KB:
+    //     FILE_BEGIN (who gets it, name, kind, size)  ->  FILE_CHUNK ... FILE_CHUNK  ->  FILE_END
+    // The server writes the chunks to disk. Everybody in the chat then gets a message that points to the stored
+    // file, and downloads it (FILE_GET) when they want it, again in chunks.
+
+    /** A running upload. cancel() stops it before the next chunk; the server then throws away what it already got. */
+    public static final class Upload {
+        private volatile boolean cancelled;
+
+        public void cancel() {
+            cancelled = true;
         }
     }
 
-    public void sendFile(byte type, File file, TransferListener transferListener) throws IOException {
-        if (type != ChatProtocol.TYPE_IMAGE && type != ChatProtocol.TYPE_FILE) {
-            throw new IllegalArgumentException("Only image and file attachments can be uploaded here.");
-        }
+    /** Uploads a file to GroupChat ({@code recipient} == null) or to one person. Returns at once; the work runs in the background. */
+    public Upload sendFile(byte kind, File file, String recipient, TransferListener listener) throws IOException {
         if (!Files.isRegularFile(file.toPath()) || !Files.isReadable(file.toPath())) {
             throw new IOException("The selected file is not a readable regular file.");
         }
-        long length = Files.size(file.toPath());
-        if (length > ChatProtocol.MAX_ATTACHMENT_BYTES) {
-            throw new IOException("Files must be smaller than 2 GB.");
-        }
+        return upload(kind, file.getName(), new FileInputStream(file), Files.size(file.toPath()), recipient, listener);
+    }
+
+    /** Uploads bytes that are already in memory (a recorded voice message). */
+    public Upload sendBytes(byte kind, String name, byte[] data, String recipient, TransferListener listener) {
+        return upload(kind, name, new ByteArrayInputStream(data), data.length, recipient, listener);
+    }
+
+    private Upload upload(byte kind, String name, InputStream source, long size, String recipient, TransferListener listener) {
+        Upload upload = new Upload();
+        TransferListener report = listener == null ? IGNORE : listener;
         Thread uploader = new Thread(() -> {
-            try (BufferedInputStream fileInput = new BufferedInputStream(new FileInputStream(file))) {
+            try (InputStream file = source) {
                 synchronized (output) {
-                    output.writeByte(type);
-                    output.writeUTF(file.getName());
-                    output.writeInt((int) length);
-                    byte[] buffer = new byte[1024 * 1024]; // big pieces = faster uploads
-                    long transferred = 0;
-                    long lastReported = 0;
-                    long reportInterval = Math.max(buffer.length, length / 100);
-                    while (transferred < length) {
-                        int count = fileInput.read(buffer, 0,
-                                (int) Math.min(buffer.length, length - transferred));
-                        if (count < 0) {
-                            throw new IOException("The file changed or ended during upload.");
-                        }
-                        output.write(buffer, 0, count);
-                        transferred += count;
-                        if (transferred - lastReported >= reportInterval || transferred == length) {
-                            long progress = transferred;
-                            lastReported = transferred;
-                            SwingUtilities.invokeLater(() -> transferListener.onProgress(progress, length));
-                        }
-                    }
-                    if (fileInput.read() != -1) {
-                        throw new IOException("The file changed while it was being sent.");
-                    }
+                    output.writeByte(ChatProtocol.TYPE_FILE_BEGIN);
+                    output.writeUTF(recipient == null ? "" : recipient);
+                    output.writeUTF(name);
+                    output.writeByte(kind);
+                    output.writeLong(size);
                     output.flush();
                 }
-                SwingUtilities.invokeLater(transferListener::onComplete);
+                byte[] chunk = new byte[ChatProtocol.FILE_CHUNK_BYTES];
+                long sent = 0;
+                long lastReport = 0;
+                while (sent < size && !upload.cancelled) {
+                    int count = file.read(chunk, 0, (int) Math.min(chunk.length, size - sent));
+                    if (count < 0) {
+                        throw new IOException("The file changed or ended during upload.");
+                    }
+                    synchronized (output) { // one chunk at a time, so chat messages can slip in between
+                        output.writeByte(ChatProtocol.TYPE_FILE_CHUNK);
+                        output.writeInt(count);
+                        output.write(chunk, 0, count);
+                        output.flush();
+                    }
+                    sent += count;
+                    long now = System.nanoTime();
+                    if (now - lastReport > 150_000_000L || sent == size) {
+                        lastReport = now;
+                        long done = sent;
+                        SwingUtilities.invokeLater(() -> report.onProgress(done, size));
+                    }
+                }
+                synchronized (output) {
+                    output.writeByte(ChatProtocol.TYPE_FILE_END);
+                    output.writeByte(upload.cancelled ? 0 : 1); // 0 tells the server to delete the unfinished file
+                    output.flush();
+                }
+                SwingUtilities.invokeLater(upload.cancelled ? report::onCancelled : report::onComplete);
             } catch (IOException error) {
                 try {
                     socket.close();
@@ -267,11 +296,110 @@ public final class ChatClient implements AutoCloseable {
                     error.addSuppressed(closeError);
                 }
                 closed = true;
-                SwingUtilities.invokeLater(() -> transferListener.onFailure(error));
+                SwingUtilities.invokeLater(() -> report.onFailure(error));
             }
         }, "nova-upload");
         uploader.setDaemon(true);
         uploader.start();
+        return upload;
+    }
+
+    /** Does nothing: used when the caller does not care about the progress. */
+    private static final TransferListener IGNORE = new TransferListener() {
+        @Override
+        public void onProgress(long done, long total) {
+        }
+
+        @Override
+        public void onComplete() {
+        }
+
+        @Override
+        public void onFailure(IOException error) {
+        }
+    };
+
+    /** A file we asked the server for: its pieces are written to {@code target} by the reader thread. */
+    private static final class Download {
+        final OutputStream target;
+        final long total;
+        final TransferListener listener;
+        long received;
+        long lastReport;
+        boolean failed;
+
+        Download(OutputStream target, long total, TransferListener listener) {
+            this.target = target;
+            this.total = total;
+            this.listener = listener;
+        }
+    }
+
+    private final Map<Long, Download> downloads = new ConcurrentHashMap<Long, Download>();
+    private final AtomicLong nextRequest = new AtomicLong();
+
+    /** Asks the server for a stored file and writes it to {@code target} as it arrives; the stream is closed at the end. */
+    public void download(long fileId, long total, OutputStream target, TransferListener listener) throws IOException {
+        long request = nextRequest.incrementAndGet();
+        downloads.put(request, new Download(target, total, listener));
+        try {
+            synchronized (output) {
+                output.writeByte(ChatProtocol.TYPE_FILE_GET);
+                output.writeLong(fileId);
+                output.writeLong(request);
+                output.flush();
+            }
+        } catch (IOException error) {
+            downloads.remove(request);
+            throw error;
+        }
+    }
+
+    /** Reader thread: one piece of a requested file. */
+    private void receiveFileData() throws IOException {
+        long request = input.readLong();
+        int length = input.readInt();
+        if (length < 0 || length > ChatProtocol.MAX_CHUNK_BYTES) {
+            throw new IOException("Received an invalid file chunk.");
+        }
+        byte[] piece = new byte[length];
+        input.readFully(piece);
+        Download download = downloads.get(request);
+        if (download == null || download.failed) {
+            return;
+        }
+        try {
+            download.target.write(piece);
+            download.received += length;
+            long now = System.nanoTime();
+            if (now - download.lastReport > 150_000_000L) {
+                download.lastReport = now;
+                long done = download.received;
+                SwingUtilities.invokeLater(() -> download.listener.onProgress(done, download.total));
+            }
+        } catch (IOException error) {
+            download.failed = true;
+        }
+    }
+
+    /** Reader thread: the server has sent the whole file (or could not). */
+    private void finishDownload() throws IOException {
+        long request = input.readLong();
+        boolean complete = input.readByte() == 1;
+        Download download = downloads.remove(request);
+        if (download == null) {
+            return;
+        }
+        try {
+            download.target.close();
+        } catch (IOException error) {
+            download.failed = true;
+        }
+        if (complete && !download.failed) {
+            SwingUtilities.invokeLater(download.listener::onComplete);
+        } else {
+            SwingUtilities.invokeLater(() -> download.listener.onFailure(new IOException("The file could not be downloaded.")));
+        }
     }
 
     public boolean isClosed() {

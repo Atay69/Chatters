@@ -48,6 +48,29 @@ public final class ChatProtocol {
     public static final int STATUS_BUSY = 3;        // "Do not disturb"
     public static final int STATUS_INVISIBLE = 4;
 
+    // ---- big files: sent in small chunks, stored on the server, downloaded on demand ----
+    public static final byte TYPE_FILE_BEGIN = 18;  // client -> server: UTF recipient ("" = GroupChat), UTF file name, byte kind, long size
+    public static final byte TYPE_FILE_CHUNK = 19;  // client -> server: int length, then that many bytes of the file
+    public static final byte TYPE_FILE_END = 20;    // client -> server: byte 1 = the whole file was sent, 0 = upload cancelled
+    public static final byte TYPE_FILE_GET = 21;    // client -> server: long file id, long request number (please send me this file)
+    public static final byte TYPE_FILE_DATA = 22;   // server -> client: long request number, int length, then a piece of the file
+    public static final byte TYPE_FILE_DONE = 23;   // server -> client: long request number, byte 1 = complete, 0 = failed
+
+    /** Size of the pieces a file is cut into (never more than MAX_CHUNK_BYTES). */
+    public static final int FILE_CHUNK_BYTES = 256 * 1024;
+    public static final int MAX_CHUNK_BYTES = 4 * 1024 * 1024;
+
+    /**
+     * A message that starts with this character is not text but a stored file:
+     *     FILE_MARK + id + "|" + kind + "|" + size + "|" + file name        (kind = TYPE_IMAGE, TYPE_FILE or TYPE_AUDIO)
+     * It travels and is saved like any text message (in GroupChat and in private chats).
+     */
+    public static final String FILE_MARK = "\u0001";
+
+    public static String fileMessage(long id, byte kind, long size, String name) {
+        return FILE_MARK + id + "|" + kind + "|" + size + "|" + name;
+    }
+
     /** First character of an AI query / AI reply text: what the assistant is asked to do. */
     public static final char AI_SUGGEST = 'S';
     public static final char AI_COMPLETE = 'C';

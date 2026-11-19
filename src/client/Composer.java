@@ -43,9 +43,7 @@ import java.io.IOException;
  */
 final class Composer extends Widgets.TintedPanel {
     private static final long serialVersionUID = 1L;
-    private static final int MAX_FILE_BYTES = ChatProtocol.MAX_ATTACHMENT_BYTES;
     private static final int MAX_TEXT_CHARS = 60000;
-    private static final int MAX_PRIVATE_VOICE_BYTES = ChatProtocol.MAX_ATTACHMENT_BYTES;
 
     /** What the composer needs from the window around it. */
     interface Host {
@@ -76,7 +74,9 @@ final class Composer extends Widgets.TintedPanel {
     private final Widgets.Button sendButton = new Widgets.Button("Send", null, null);
     private final JPanel suggestions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
     private final JProgressBar uploadBar = new JProgressBar(0, 100);
-    private final JPanel uploadRow = new JPanel(new BorderLayout());
+    private final JPanel uploadRow = new JPanel(new BorderLayout(8, 0));
+    private final Widgets.Button cancelButton = new Widgets.Button("Cancel", Theme.Role.CONTROL, Theme.Role.TEXT);
+    private ChatClient.Upload currentUpload; // the running upload (null = none); the Cancel button stops it
     private final Widgets.Label status = new Widgets.Label(" ", Theme.Role.MUTED);
     private Timer hideBarTimer;
     private boolean uploading;
@@ -97,6 +97,14 @@ final class Composer extends Widgets.TintedPanel {
         uploadRow.setOpaque(false);
         uploadRow.setBorder(BorderFactory.createEmptyBorder(0, 5, 6, 5));
         uploadRow.add(uploadBar, BorderLayout.CENTER);
+        cancelButton.setToolTipText("Stop this upload");
+        cancelButton.addActionListener(event -> {
+            if (currentUpload != null) {
+                currentUpload.cancel();
+                cancelButton.setEnabled(false);
+            }
+        });
+        uploadRow.add(cancelButton, BorderLayout.EAST);
         uploadRow.setVisible(false);
         status.setFont(Theme.font(Font.PLAIN, 11));
         status.setBorder(BorderFactory.createEmptyBorder(0, 5, 6, 0));
@@ -208,10 +216,6 @@ final class Composer extends Widgets.TintedPanel {
     // ---------------------------------------------------------------- files and images
 
     private void chooseFile(boolean imageOnly) {
-        if (host.activePeer() != null) {
-            showStatus("File and image sharing is currently available in GroupChat only.", false);
-            return;
-        }
         FileDialog chooser = new FileDialog(host.frame(), imageOnly ? "Choose an image to send" : "Choose a file to send", FileDialog.LOAD);
         if (imageOnly) {
             chooser.setFilenameFilter((directory, name) -> name.toLowerCase().matches(".*\\.(png|jpe?g|gif|bmp)"));
@@ -229,11 +233,12 @@ final class Composer extends Widgets.TintedPanel {
             return;
         }
         uploading = true;
+        cancelButton.setEnabled(true);
         setBusy(true);
         showStatus("Sending " + file.getName() + " (0%)...", false);
         showProgress(file.getName(), 0, "0%");
         try {
-            host.client().sendFile(type, file, new ChatClient.TransferListener() {
+            currentUpload = host.client().sendFile(type, file, host.activePeer(), new ChatClient.TransferListener() {
                 @Override
                 public void onProgress(long sent, long total) {
                     int percent = total == 0 ? 100 : (int) (sent * 100 / total);
@@ -246,6 +251,14 @@ final class Composer extends Widgets.TintedPanel {
                     uploading = false;
                     finishProgress(file.getName(), true);
                     showStatus("Uploaded " + file.getName() + "; waiting for server confirmation...", false);
+                    setBusy(false);
+                }
+
+                @Override
+                public void onCancelled() {
+                    uploading = false;
+                    uploadRow.setVisible(false);
+                    showStatus("Upload cancelled: " + file.getName(), false);
                     setBusy(false);
                 }
 
@@ -309,13 +322,7 @@ final class Composer extends Widgets.TintedPanel {
             recordButton.setTextRole(Theme.Role.TEXT);
             recordButton.setBackgroundOverride(null);
             String peer = host.activePeer(); // null = GroupChat
-            if (wav.length > (peer == null ? MAX_FILE_BYTES : MAX_PRIVATE_VOICE_BYTES)) {
-                showStatus("Voice message is too large to send.", true);
-            } else if (peer == null) {
-                host.client().sendAudio(wav);
-            } else {
-                host.client().sendPrivateAudio(peer, wav);
-            }
+            host.client().sendBytes(ChatProtocol.TYPE_AUDIO, "voice_message.wav", wav, peer, null);
         } catch (LineUnavailableException error) {
             JOptionPane.showMessageDialog(host.frame(), "Microphone unavailable: " + error.getMessage());
         } catch (IOException error) {

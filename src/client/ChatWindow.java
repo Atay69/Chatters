@@ -129,7 +129,17 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         Theme.dark = Settings.getBoolean("darkMode." + username, Settings.getBoolean("darkMode", true));
         Theme.accentIndex = Settings.getInt("accent." + username, 0) % Theme.ACCENT_NAMES.length;
         this.wallpapers = new WallpaperManager(Paths.get("wallpapers"), Settings.getInt("wallpaper." + username, Settings.getInt("wallpaper", -1)));
-        this.messages = new MessageView(frame, username);
+        this.messages = new MessageView(frame, username, new MessageView.Attachments() {
+            @Override
+            public void fetch(ChatEntry entry, java.util.function.Consumer<byte[]> done) {
+                fetchFile(entry, done);
+            }
+
+            @Override
+            public void download(ChatEntry entry) {
+                downloadFile(entry);
+            }
+        });
         this.composer = new Composer(this);
         buildWindow();
         showConversation();
@@ -400,6 +410,79 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
     public void notice(String text) {
         String now = "(" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")) + ")";
         receive(new ChatEntry("SYSTEM", now, text, ChatProtocol.TYPE_SYSTEM, new byte[0]), activePeer);
+    }
+
+    // ---------------------------------------------------------------- files stored on the server
+
+    private static final int MAX_CACHED_FILE_BYTES = 16 * 1024 * 1024;
+    private final Map<Long, byte[]> loadedFiles = new HashMap<Long, byte[]>(); // small downloads, so redrawing does not download again
+
+    /** Downloads a whole file into memory (a picture to show, a voice message to play). */
+    private void fetchFile(ChatEntry entry, java.util.function.Consumer<byte[]> done) {
+        byte[] cached = loadedFiles.get(entry.fileId);
+        if (cached != null) {
+            done.accept(cached);
+            return;
+        }
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        try {
+            client.download(entry.fileId, entry.fileSize, buffer, new ChatClient.TransferListener() {
+                @Override
+                public void onProgress(long received, long total) {
+                }
+
+                @Override
+                public void onComplete() {
+                    byte[] bytes = buffer.toByteArray();
+                    if (bytes.length <= MAX_CACHED_FILE_BYTES) {
+                        loadedFiles.put(entry.fileId, bytes);
+                    }
+                    done.accept(bytes);
+                }
+
+                @Override
+                public void onFailure(IOException error) {
+                    composer.showStatus("Could not load " + entry.text + ".", true);
+                }
+            });
+        } catch (IOException error) {
+            connectionLost(error);
+        }
+    }
+
+    /** "Download": asks where to save the file, then streams it there while the chat keeps working. */
+    private void downloadFile(ChatEntry entry) {
+        FileDialog chooser = new FileDialog(frame, "Save shared file", FileDialog.SAVE);
+        chooser.setFile(entry.text);
+        chooser.setVisible(true);
+        if (chooser.getFile() == null) {
+            return;
+        }
+        File target = new File(chooser.getDirectory(), chooser.getFile());
+        try {
+            client.download(entry.fileId, entry.fileSize,
+                    new java.io.BufferedOutputStream(new java.io.FileOutputStream(target), 1024 * 1024),
+                    new ChatClient.TransferListener() {
+                        @Override
+                        public void onProgress(long received, long total) {
+                            int percent = total == 0 ? 100 : (int) (received * 100 / total);
+                            composer.showStatus("Downloading " + entry.text + " (" + percent + "%)...", false);
+                        }
+
+                        @Override
+                        public void onComplete() {
+                            composer.showStatus("Saved " + entry.text + " to " + target.getParent(), false);
+                        }
+
+                        @Override
+                        public void onFailure(IOException error) {
+                            composer.showStatus("Could not download " + entry.text + ": " + error.getMessage(), true);
+                        }
+                    });
+        } catch (IOException error) {
+            JOptionPane.showMessageDialog(frame, "Could not save the file: " + error.getMessage(),
+                    "Download failed", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     // ---------------------------------------------------------------- theme and wallpaper

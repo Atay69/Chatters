@@ -32,6 +32,7 @@ import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import java.util.function.Consumer;
 
 /**
  * The scrolling list of messages, as chat bubbles: yours on the right, everybody else's on the left.
@@ -48,9 +49,23 @@ final class MessageView {
     private LocalDate previousDay;
     private boolean showNames; // in GroupChat the bubbles of others carry the sender's name
 
-    MessageView(Frame owner, String self) {
+    /** What this view needs from the window for files that are stored on the server. */
+    interface Attachments {
+        /** Loads the whole file into memory (to show a picture or play a voice message); {@code done} gets the bytes. */
+        void fetch(ChatEntry entry, Consumer<byte[]> done);
+
+        /** Asks where to save the file and downloads it there. */
+        void download(ChatEntry entry);
+    }
+
+    private static final long MAX_PREVIEW_BYTES = 4L * 1024 * 1024; // bigger pictures are only offered as a download
+
+    private final Attachments attachments;
+
+    MessageView(Frame owner, String self, Attachments attachments) {
         this.owner = owner;
         this.self = self;
+        this.attachments = attachments;
         list.setLayout(new BoxLayout(list, BoxLayout.Y_AXIS));
         list.setOpaque(false);
         list.setBorder(BorderFactory.createEmptyBorder(14, 26, 14, 26));
@@ -161,10 +176,10 @@ final class MessageView {
             voice.add(new Widgets.Label("Voice message", Theme.Role.TEXT));
             Widgets.Button play = actionButton("Play");
             play.addActionListener(event -> {
-                try {
-                    VoiceRecorder.play(entry.data);
-                } catch (Exception error) {
-                    JOptionPane.showMessageDialog(owner, "Could not play this voice message: " + error.getMessage());
+                if (entry.stored()) {
+                    attachments.fetch(entry, this::playVoice); // download it, then play
+                } else {
+                    playVoice(entry.data);
                 }
             });
             voice.add(play);
@@ -182,10 +197,10 @@ final class MessageView {
         Widgets.Label name = new Widgets.Label(shorten(entry.text, 34), Theme.Role.TEXT);
         name.setToolTipText(entry.text);
         details.add(name);
-        details.add(new Widgets.Label(ChatEntry.formatSize(entry.data.length), Theme.Role.MUTED));
+        details.add(new Widgets.Label(ChatEntry.formatSize(entry.fileSize), Theme.Role.MUTED));
         card.add(details, BorderLayout.CENTER);
         Widgets.Button download = actionButton("Download");
-        download.addActionListener(event -> save(entry.text, entry.data));
+        download.addActionListener(event -> saveOrDownload(entry));
         card.add(download, BorderLayout.EAST);
         return card;
     }
@@ -194,24 +209,60 @@ final class MessageView {
         JPanel content = new JPanel();
         content.setOpaque(false);
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
-        try {
-            BufferedImage picture = ImageIO.read(new ByteArrayInputStream(entry.data));
-            if (picture != null) {
-                JLabel image = new JLabel(new ImageIcon(fitWidth(picture, 300)));
-                image.setAlignmentX(Component.LEFT_ALIGNMENT);
-                content.add(image);
-            }
-        } catch (IOException unreadable) {
-            // not a readable picture: only the name and the download button remain
+        JPanel picture = new JPanel(new BorderLayout()); // the picture appears here as soon as it is loaded
+        picture.setOpaque(false);
+        picture.setAlignmentX(Component.LEFT_ALIGNMENT);
+        content.add(picture);
+        if (!entry.stored()) {
+            showPicture(picture, entry.data);
+        } else if (entry.fileSize <= MAX_PREVIEW_BYTES) {
+            attachments.fetch(entry, bytes -> showPicture(picture, bytes));
         }
         JComponent name = textLabel("[Image: " + entry.text + "]");
         name.setAlignmentX(Component.LEFT_ALIGNMENT);
         content.add(name);
         Widgets.Button download = actionButton("Download image");
         download.setAlignmentX(Component.LEFT_ALIGNMENT);
-        download.addActionListener(event -> save(entry.text, entry.data));
+        download.addActionListener(event -> saveOrDownload(entry));
         content.add(download);
         return content;
+    }
+
+    private void showPicture(JPanel holder, byte[] bytes) {
+        try {
+            BufferedImage picture = ImageIO.read(new ByteArrayInputStream(bytes));
+            if (picture == null) {
+                return;
+            }
+            JScrollBar bar = scroll.getVerticalScrollBar();
+            boolean atBottom = bar.getValue() + bar.getVisibleAmount() >= bar.getMaximum() - 4;
+            holder.add(new JLabel(new ImageIcon(fitWidth(picture, 300))), BorderLayout.CENTER);
+            holder.revalidate();
+            list.revalidate();
+            list.repaint();
+            if (atBottom) { // the picture made the list taller: stay at the newest message
+                SwingUtilities.invokeLater(() -> bar.setValue(bar.getMaximum()));
+            }
+        } catch (IOException unreadable) {
+            // not a readable picture: only the name and the download button remain
+        }
+    }
+
+    private void playVoice(byte[] wav) {
+        try {
+            VoiceRecorder.play(wav);
+        } catch (Exception error) {
+            JOptionPane.showMessageDialog(owner, "Could not play this voice message: " + error.getMessage());
+        }
+    }
+
+    /** Old attachments carry their bytes and are saved from memory; new ones are downloaded from the server. */
+    private void saveOrDownload(ChatEntry entry) {
+        if (entry.stored()) {
+            attachments.download(entry);
+        } else {
+            save(entry.text, entry.data);
+        }
     }
 
     /** A text message. Known emoji become pictures; a message of only 1-3 emoji is shown large. */
