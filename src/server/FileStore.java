@@ -1,5 +1,7 @@
 package server;
 
+import shared.ChatProtocol;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,6 +33,19 @@ final class FileStore {
     static Path partPath(long id) throws IOException {
         Files.createDirectories(DIRECTORY);
         return DIRECTORY.resolve(id + ".part");
+    }
+
+    /** Deletes the stored file that a chat message points to (nothing happens for an ordinary text message). */
+    static void deleteOf(String messageText) {
+        if (!messageText.startsWith(ChatProtocol.FILE_MARK)) {
+            return;
+        }
+        try {
+            long id = Long.parseLong(messageText.substring(ChatProtocol.FILE_MARK.length()).split("\\|", 2)[0]);
+            Files.deleteIfExists(path(id));
+        } catch (NumberFormatException | IOException ignored) {
+            // not a file message, or the file is already gone
+        }
     }
 
     /** A file name that is safe to show: no folders, no control characters, not too long. */

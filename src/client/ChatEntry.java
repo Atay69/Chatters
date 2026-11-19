@@ -20,8 +20,20 @@ final class ChatEntry {
     final byte[] data;      // the bytes of an old (saved inside the history) attachment; empty for stored files
     final long fileId;      // a file stored on the server: its id (-1 = this message is not a stored file)
     final long fileSize;    // the size of the attachment in bytes
+    final long id;          // the id the server gave this message (0 = unknown); needed to edit or delete it
+    final boolean edited;   // true after the author changed the text
 
     ChatEntry(String sender, String timestamp, String text, byte type, byte[] data) {
+        this(sender, timestamp, text, type, data, 0, false);
+    }
+
+    ChatEntry(String sender, String timestamp, String text, byte type, byte[] data, long id) {
+        this(sender, timestamp, text, type, data, id, false);
+    }
+
+    private ChatEntry(String sender, String timestamp, String text, byte type, byte[] data, long messageId, boolean edited) {
+        this.id = messageId;
+        this.edited = edited;
         this.sender = sender;
         this.timestamp = timestamp;
         // A text message that starts with FILE_MARK is really a stored file: "id|kind|size|name".
@@ -47,6 +59,11 @@ final class ChatEntry {
         this.type = id >= 0 ? kind : type;
         this.text = id >= 0 ? name : text;
         this.data = data;
+    }
+
+    /** The same message after its text was edited. */
+    ChatEntry withText(String newText) {
+        return new ChatEntry(sender, timestamp, newText, type, data, id, true);
     }
 
     /** True when the file lives on the server and has to be downloaded to be shown or saved. */

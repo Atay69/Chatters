@@ -52,6 +52,9 @@ public class ChatServer {
     private static final Set<String> knownUsers = Collections.synchronizedSet(new TreeSet<String>(String.CASE_INSENSITIVE_ORDER));
     /** The saved GroupChat messages. Also the lock that keeps "history, then live messages" in order. */
     static final List<StoredMessage> groupHistory = new ArrayList<StoredMessage>();
+    /** The edits and deletes of GroupChat messages (replayed over the saved messages at start-up). */
+    private static final ChangeLog groupChanges = new ChangeLog(DATA_DIRECTORY.resolve("group-changes.bin"));
+    private static long lastGroupId; // the id of the newest GroupChat message (ids start at 1 and are never reused)
     static UserStore accounts;
     static PrivateHistory privateHistory;
 
@@ -125,9 +128,27 @@ public class ChatServer {
                 }
                 byte[] data = new byte[length];
                 in.readFully(data);
-                groupHistory.add(new StoredMessage(type, sender, timestamp, meta, data));
+                groupHistory.add(new StoredMessage(++lastGroupId, type, sender, timestamp, meta, data));
             }
         }
+        groupChanges.replay(new ChangeLog.Replay() { // edits and deletes made earlier
+            @Override
+            public void edited(long id, String newText) {
+                StoredMessage message = findGroup(id);
+                if (message != null) {
+                    message.meta = newText;
+                    message.edited = true;
+                }
+            }
+
+            @Override
+            public void deleted(long id) {
+                StoredMessage message = findGroup(id);
+                if (message != null) {
+                    groupHistory.remove(message);
+                }
+            }
+        });
     }
 
     /** Remembers a name that signed in, for the members list. */
@@ -146,7 +167,7 @@ public class ChatServer {
     }
 
     /** Saves a GroupChat message (text, image, file or voice message) on disk and in memory. */
-    static void persistGroupMessage(byte type, String sender, String timestamp, String meta, byte[] data) throws IOException {
+    static long persistGroupMessage(byte type, String sender, String timestamp, String meta, byte[] data) throws IOException {
         synchronized (groupHistory) {
             long recordSize = 1L + 2 + sender.length() * 3L + 2 + timestamp.length() * 3L + 2 + meta.length() * 3L + 4 + data.length;
             if (Files.exists(GROUP_HISTORY_FILE) && Files.size(GROUP_HISTORY_FILE) + recordSize > MAX_HISTORY_BYTES) {
@@ -161,14 +182,40 @@ public class ChatServer {
                 out.writeInt(data.length);
                 out.write(data);
             }
-            groupHistory.add(new StoredMessage(type, sender, timestamp, meta, data));
+            groupHistory.add(new StoredMessage(++lastGroupId, type, sender, timestamp, meta, data));
+            return lastGroupId;
         }
+    }
+
+    /** The saved GroupChat message with this id, or null (never existed, or deleted). Call it inside synchronized (groupHistory). */
+    static StoredMessage findGroup(long id) {
+        for (StoredMessage message : groupHistory) {
+            if (message.id == id) {
+                return message;
+            }
+        }
+        return null;
+    }
+
+    static void editGroup(StoredMessage message, String newText) throws IOException {
+        groupChanges.edit(message.id, newText);
+        message.meta = newText;
+        message.edited = true;
+    }
+
+    static void deleteGroup(StoredMessage message) throws IOException {
+        groupChanges.delete(message.id);
+        groupHistory.remove(message);
     }
 
     static void sendGroupHistory(ClientHandler target) {
         synchronized (groupHistory) {
             for (StoredMessage message : groupHistory) {
-                target.sendPacket(message.type, message.sender, message.timestamp, message.meta, message.data);
+                target.sendPacket(message.type, message.sender, message.timestamp, message.meta, message.data, message.id);
+                if (message.edited) { // the history carries the newest text; this only adds the "edited" label
+                    target.sendPacket(ChatProtocol.TYPE_MSG_EDITED, message.sender, message.timestamp, "",
+                            message.meta.getBytes(StandardCharsets.UTF_8), message.id);
+                }
             }
         }
     }
@@ -177,23 +224,29 @@ public class ChatServer {
     static void sendPrivateHistory(ClientHandler target) {
         for (PrivateHistory.Message message : privateHistory.forUser(target.displayName)) {
             if (message.audio == null) {
-                target.sendPacket(ChatProtocol.TYPE_PRIVATE, message.sender, message.timestamp, message.recipient,
-                        message.text.getBytes(StandardCharsets.UTF_8));
+                byte[] text = message.text.getBytes(StandardCharsets.UTF_8);
+                target.sendPacket(ChatProtocol.TYPE_PRIVATE, message.sender, message.timestamp, message.recipient, text, message.id);
+                if (message.edited) {
+                    target.sendPacket(ChatProtocol.TYPE_MSG_EDITED, message.sender, message.timestamp, message.recipient, text, message.id);
+                }
             } else {
-                target.sendPacket(ChatProtocol.TYPE_PRIVATE_AUDIO, message.sender, message.timestamp, message.recipient, message.audio);
+                target.sendPacket(ChatProtocol.TYPE_PRIVATE_AUDIO, message.sender, message.timestamp, message.recipient, message.audio, message.id);
             }
         }
     }
 
     /** One saved GroupChat message. */
     static class StoredMessage {
-        private final byte type;
-        private final String sender;
-        private final String timestamp;
-        private final String meta;   // the text, or the file name
-        private final byte[] data;   // the file / image / voice bytes (empty for text)
+        final long id;
+        final byte type;
+        final String sender;
+        final String timestamp;
+        volatile String meta;    // the text, or the file name
+        final byte[] data;       // the bytes of an old attachment (empty for text and stored files)
+        volatile boolean edited;
 
-        private StoredMessage(byte type, String sender, String timestamp, String meta, byte[] data) {
+        private StoredMessage(long id, byte type, String sender, String timestamp, String meta, byte[] data) {
+            this.id = id;
             this.type = type;
             this.sender = sender;
             this.timestamp = timestamp;
@@ -288,17 +341,22 @@ public class ChatServer {
 
     /** Sends a packet to every client that has finished logging in. */
     static void broadcastPacket(byte type, String sender, String timestamp, String meta, byte[] data) {
+        broadcastPacket(type, sender, timestamp, meta, data, 0);
+    }
+
+    /** Same, for a chat message: {@code id} is its message id. */
+    static void broadcastPacket(byte type, String sender, String timestamp, String meta, byte[] data, long id) {
         synchronized (clients) {
             for (ClientHandler client : clients) {
                 if (client.ready) {
-                    client.sendPacket(type, sender, timestamp, meta, data);
+                    client.sendPacket(type, sender, timestamp, meta, data, id);
                 }
             }
         }
     }
 
     static void broadcastPacket(ChatProtocol.Packet packet) {
-        broadcastPacket(packet.type, packet.sender, packet.timestamp, packet.metadata, packet.data);
+        broadcastPacket(packet.type, packet.sender, packet.timestamp, packet.metadata, packet.data, packet.id);
     }
 
     /** Tells every client who exists and who is online (after somebody joins or leaves). */

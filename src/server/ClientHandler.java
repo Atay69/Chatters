@@ -164,6 +164,10 @@ final class ClientHandler extends Thread {
                 if (!handleTextMessage(time)) {
                     return; // the client said /quit
                 }
+            } else if (type == ChatProtocol.TYPE_MSG_EDIT) {
+                handleMessageEdit();
+            } else if (type == ChatProtocol.TYPE_MSG_DELETE) {
+                handleMessageDelete();
             } else if (type == ChatProtocol.TYPE_FILE_BEGIN) {
                 handleFileBegin();
             } else if (type == ChatProtocol.TYPE_FILE_CHUNK) {
@@ -203,14 +207,15 @@ final class ClientHandler extends Thread {
     /** Saves a message (text, or a stored file) in GroupChat and sends it to everybody. */
     private void postToGroup(String time, String text) {
         synchronized (ChatServer.groupHistory) {
+            long id;
             try {
-                ChatServer.persistGroupMessage(ChatProtocol.TYPE_TEXT, displayName, time, text, new byte[0]);
+            id = ChatServer.persistGroupMessage(ChatProtocol.TYPE_TEXT, displayName, time, text, new byte[0]);
             } catch (IOException error) {
                 sendPacket(ChatProtocol.TYPE_TRANSFER_STATUS, "SYSTEM", time, "Message was not sent: " + error.getMessage(), new byte[0]);
                 return;
             }
             System.out.println(time + " " + displayName + " : " + (text.startsWith(ChatProtocol.FILE_MARK) ? "[file]" : text));
-            ChatServer.broadcastPacket(ChatProtocol.TYPE_TEXT, displayName, time, text, new byte[0]);
+            ChatServer.broadcastPacket(ChatProtocol.TYPE_TEXT, displayName, time, text, new byte[0], id);
         }
     }
 
@@ -232,17 +237,100 @@ final class ClientHandler extends Thread {
     /** Saves a private message (text, or a stored file) and sends it to the sender and the recipient. */
     private void postPrivate(String time, String recipientAccount, String text) {
         synchronized (ChatServer.groupHistory) {
+            PrivateHistory.Message saved;
             try {
-                ChatServer.privateHistory.add(displayName, recipientAccount, time, text);
+                saved = ChatServer.privateHistory.add(displayName, recipientAccount, time, text);
             } catch (IOException error) {
                 sendPacket(ChatProtocol.TYPE_TRANSFER_STATUS, "SYSTEM", time, "Message was not sent: " + error.getMessage(), new byte[0]);
                 return;
             }
             byte[] message = text.getBytes(StandardCharsets.UTF_8);
-            sendPacket(ChatProtocol.TYPE_PRIVATE, displayName, time, recipientAccount, message); // the sender sees it too
-            ClientHandler recipient = ChatServer.findOnlineUser(recipientAccount);
-            if (recipient != null) {
-                recipient.sendPacket(ChatProtocol.TYPE_PRIVATE, displayName, time, recipientAccount, message);
+            sendToBoth(recipientAccount, ChatProtocol.TYPE_PRIVATE, time, message, saved.id);
+        }
+    }
+
+    // ---------------------------------------------------------------- editing and deleting messages
+
+    /** Sends one packet to me and to the other person of a private chat (if online). */
+    private void sendToBoth(String recipientAccount, byte type, String time, byte[] data, long id) {
+        sendPacket(type, displayName, time, recipientAccount, data, id);
+        ClientHandler recipient = ChatServer.findOnlineUser(recipientAccount);
+        if (recipient != null) {
+            recipient.sendPacket(type, displayName, time, recipientAccount, data, id);
+        }
+    }
+
+    /** "Edit": change the text of one of MY text messages. {@code conversation} is "" for GroupChat, else the other person. */
+    private void handleMessageEdit() throws IOException {
+        String conversation = input.readUTF();
+        long id = input.readLong();
+        String text = input.readUTF();
+        if (text.trim().isEmpty() || text.length() > 60000) {
+            sendStatus("Edit refused: the message is empty or too long.");
+            return;
+        }
+        String time = ChatServer.getTimestamp();
+        synchronized (ChatServer.groupHistory) {
+            try {
+                if (conversation.isEmpty()) {
+                    ChatServer.StoredMessage message = ChatServer.findGroup(id);
+                    if (message == null || !message.sender.equalsIgnoreCase(displayName)
+                            || message.type != ChatProtocol.TYPE_TEXT || message.meta.startsWith(ChatProtocol.FILE_MARK)) {
+                        sendStatus("You can only edit your own text messages.");
+                        return;
+                    }
+                    String filtered = ProfanityFilter.filter(text);
+                    ChatServer.editGroup(message, filtered);
+                    ChatServer.broadcastPacket(ChatProtocol.TYPE_MSG_EDITED, displayName, time, "",
+                            filtered.getBytes(StandardCharsets.UTF_8), id);
+                } else {
+                    String recipient = ChatServer.canonicalUser(conversation);
+                    PrivateHistory.Message message = ChatServer.privateHistory.find(id);
+                    if (recipient == null || message == null || !message.sender.equalsIgnoreCase(displayName)
+                            || !message.recipient.equalsIgnoreCase(recipient) || message.audio != null
+                            || message.text.startsWith(ChatProtocol.FILE_MARK)) {
+                        sendStatus("You can only edit your own text messages.");
+                        return;
+                    }
+                    ChatServer.privateHistory.edit(message, text);
+                    sendToBoth(recipient, ChatProtocol.TYPE_MSG_EDITED, time, text.getBytes(StandardCharsets.UTF_8), id);
+                }
+            } catch (IOException error) {
+                sendStatus("Edit failed: " + error.getMessage());
+            }
+        }
+    }
+
+    /** "Delete": remove one of MY messages for everybody (a stored file is deleted from the server's disk too). */
+    private void handleMessageDelete() throws IOException {
+        String conversation = input.readUTF();
+        long id = input.readLong();
+        String time = ChatServer.getTimestamp();
+        synchronized (ChatServer.groupHistory) {
+            try {
+                if (conversation.isEmpty()) {
+                    ChatServer.StoredMessage message = ChatServer.findGroup(id);
+                    if (message == null || !message.sender.equalsIgnoreCase(displayName)) {
+                        sendStatus("You can only delete your own messages.");
+                        return;
+                    }
+                    ChatServer.deleteGroup(message);
+                    FileStore.deleteOf(message.meta);
+                    ChatServer.broadcastPacket(ChatProtocol.TYPE_MSG_DELETED, displayName, time, "", new byte[0], id);
+                } else {
+                    String recipient = ChatServer.canonicalUser(conversation);
+                    PrivateHistory.Message message = ChatServer.privateHistory.find(id);
+                    if (recipient == null || message == null || !message.sender.equalsIgnoreCase(displayName)
+                            || !message.recipient.equalsIgnoreCase(recipient)) {
+                        sendStatus("You can only delete your own messages.");
+                        return;
+                    }
+                    ChatServer.privateHistory.delete(message);
+                    FileStore.deleteOf(message.text);
+                    sendToBoth(recipient, ChatProtocol.TYPE_MSG_DELETED, time, new byte[0], id);
+                }
+            } catch (IOException error) {
+                sendStatus("Delete failed: " + error.getMessage());
             }
         }
     }
@@ -462,11 +550,15 @@ final class ClientHandler extends Thread {
     // ---------------------------------------------------------------- sending to this client
 
     void sendPacket(ChatProtocol.Packet packet) {
-        sendPacket(packet.type, packet.sender, packet.timestamp, packet.metadata, packet.data);
+        sendPacket(packet.type, packet.sender, packet.timestamp, packet.metadata, packet.data, packet.id);
     }
 
-    /** Every packet has the same shape: type, sender, timestamp, metadata, and (for some types) bytes. */
-    synchronized void sendPacket(byte type, String sender, String timestamp, String metadata, byte[] data) {
+    void sendPacket(byte type, String sender, String timestamp, String metadata, byte[] data) {
+        sendPacket(type, sender, timestamp, metadata, data, 0);
+    }
+
+    /** Every packet has the same shape: type, sender, timestamp, metadata, the id (chat messages only) and (for some types) bytes. */
+    synchronized void sendPacket(byte type, String sender, String timestamp, String metadata, byte[] data, long id) {
         if (output == null) {
             return;
         }
@@ -475,6 +567,9 @@ final class ClientHandler extends Thread {
             output.writeUTF(sender);
             output.writeUTF(timestamp);
             output.writeUTF(metadata);
+            if (ChatProtocol.hasMessageId(type)) {
+                output.writeLong(id);
+            }
             if (ChatProtocol.carriesBytes(type)) {
                 output.writeInt(data.length);
                 output.write(data);

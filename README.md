@@ -14,6 +14,8 @@ A chat app written in **plain Java** (Swing windows + sockets). One computer run
 | 🖼️ | Images – shown right inside the chat |
 | 📎 | Files of **any size** (even over 2 GB), sent in small chunks, with a **Cancel** button |
 | 🎤 | Voice messages |
+| ✏️ | **Edit** and 🗑️ **delete** your own messages (right-click a message of yours); edited messages show an "edited" label |
+| 🌊 | Smooth **animations**: new messages slide in, deleted ones fade out, buttons and rows glow gently, the chat scrolls softly |
 | 🧑 | **Profile pictures** that everybody sees – click your profile card to change yours |
 | 🟢 | **Status**: 🌙 Away · 🟢 Online · ⚪ Invisible · ⛔ Do not disturb |
 | 🎨 | Dark / light theme, **6 accent colours**, soft **wallpapers** (defaults included + add your own) |
@@ -64,6 +66,8 @@ Everybody must use the **same version** of the app (server and clients). The eas
   * 📎🖼️ pick a file – a progress bar appears with a **Cancel** ❌ button.
   * Received files show **Download**, voice messages show **Play**, pictures appear inside the bubble.
 * 🙋 **Private chat:** click a person in the **Messages** list on the left.
+* ✏️ **Edit a message:** right-click one of your own messages → *Edit message*. Its text goes back into the box, the Send button becomes **Save** – press Enter or Save to keep the change, **Esc** to cancel.
+* 🗑️ **Delete a message:** right-click your own message → *Delete message* → confirm. It disappears for everybody (a file is deleted from the server too). You can only edit/delete **your own** messages.
 * 🧑 **Change your picture:** hover over your profile card (bottom left) – it darkens and says *Change profile picture* – then click it.
 * 🟢 **Change your status:** click the small status symbol on the right of your profile card.
 * ☰ **Appearance menu** (burger button, top right): *Add wallpaper…* · *Next wallpaper* · *Color* · *Light/Dark mode*.

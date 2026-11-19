@@ -24,11 +24,15 @@ import java.awt.Graphics2D;
 import java.awt.GridLayout;
 import java.awt.LayoutManager;
 import java.awt.RenderingHints;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.IdentityHashMap;
+import java.util.Map;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
@@ -49,20 +53,27 @@ final class MessageView {
     private LocalDate previousDay;
     private boolean showNames; // in GroupChat the bubbles of others carry the sender's name
 
-    /** What this view needs from the window for files that are stored on the server. */
-    interface Attachments {
+    /** What this view needs from the window: files stored on the server, and editing / deleting my messages. */
+    interface Host {
         /** Loads the whole file into memory (to show a picture or play a voice message); {@code done} gets the bytes. */
         void fetch(ChatEntry entry, Consumer<byte[]> done);
 
         /** Asks where to save the file and downloads it there. */
         void download(ChatEntry entry);
+
+        /** "Edit message": the text goes back into the message box. */
+        void edit(ChatEntry entry);
+
+        /** "Delete message": asks for confirmation, then deletes it for everybody. */
+        void delete(ChatEntry entry);
     }
 
     private static final long MAX_PREVIEW_BYTES = 4L * 1024 * 1024; // bigger pictures are only offered as a download
 
-    private final Attachments attachments;
+    private final Host attachments;
+    private final Map<ChatEntry, Widgets.AnimatedRow> rows = new IdentityHashMap<ChatEntry, Widgets.AnimatedRow>(); // the row of each message
 
-    MessageView(Frame owner, String self, Attachments attachments) {
+    MessageView(Frame owner, String self, Host attachments) {
         this.owner = owner;
         this.self = self;
         this.attachments = attachments;
@@ -82,6 +93,7 @@ final class MessageView {
 
     void clear() {
         list.removeAll();
+        rows.clear();
         previousDay = null;
         list.revalidate();
         list.repaint();
@@ -103,17 +115,50 @@ final class MessageView {
     }
 
     void add(ChatEntry entry) {
+        add(entry, false);
+    }
+
+    /** Adds a message at the end. {@code animate}: it slides and fades in and the list scrolls down smoothly. */
+    void add(ChatEntry entry, boolean animate) {
         LocalDate day = entry.date();
         if (!day.equals(previousDay)) {
             addDayHeading(day);
             previousDay = day;
         }
-        list.add(entry.type == ChatProtocol.TYPE_SYSTEM ? systemLine(entry) : bubbleRow(entry));
+        Widgets.AnimatedRow row = new Widgets.AnimatedRow(entry.type == ChatProtocol.TYPE_SYSTEM ? systemLine(entry) : bubbleRow(entry));
+        rows.put(entry, row);
+        list.add(row);
         list.revalidate();
         list.repaint();
-        SwingUtilities.invokeLater(() -> { // jump to the newest message
+        if (animate) {
+            row.appear();
+        }
+        scrollToEnd(animate);
+    }
+
+    /** A message was deleted: it fades out and the messages below it slide up. */
+    void remove(ChatEntry entry) {
+        Widgets.AnimatedRow row = rows.remove(entry);
+        if (row != null) {
+            row.disappear(() -> {
+                list.remove(row);
+                list.revalidate();
+                list.repaint();
+            });
+        }
+    }
+
+    /** Shows the newest message: with {@code smooth} the list glides down, otherwise it jumps. */
+    private void scrollToEnd(boolean smooth) {
+        SwingUtilities.invokeLater(() -> {
             JScrollBar bar = scroll.getVerticalScrollBar();
-            bar.setValue(bar.getMaximum());
+            int from = bar.getValue();
+            int to = bar.getMaximum() - bar.getVisibleAmount();
+            if (!smooth || to <= from) {
+                bar.setValue(bar.getMaximum());
+                return;
+            }
+            Animation.run(260, progress -> bar.setValue((int) Math.round(from + (to - from) * progress)), null);
         });
     }
 
@@ -148,7 +193,7 @@ final class MessageView {
         content.setAlignmentX(Component.LEFT_ALIGNMENT);
         bubble.add(content);
 
-        Widgets.Label time = new Widgets.Label(entry.time(), Theme.Role.MUTED);
+        Widgets.Label time = new Widgets.Label((entry.edited ? "edited · " : "") + entry.time(), Theme.Role.MUTED);
         time.setFont(Theme.font(Font.PLAIN, 10));
         JPanel timeRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
         timeRow.setOpaque(false);
@@ -157,10 +202,38 @@ final class MessageView {
         timeRow.add(time);
         bubble.add(timeRow);
 
+        if (mine && entry.id > 0) { // right-click on my own message: Edit / Delete
+            bubble.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent event) {
+                    showMessageMenu(event, entry);
+                }
+
+                @Override
+                public void mouseReleased(MouseEvent event) {
+                    showMessageMenu(event, entry);
+                }
+            });
+        }
+
         Row row = new Row(new BorderLayout());
         row.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
         row.add(bubble, mine ? BorderLayout.EAST : BorderLayout.WEST);
         return row;
+    }
+
+    /** The menu of my own message (right-click): Edit (text messages only) and Delete. */
+    private void showMessageMenu(MouseEvent event, ChatEntry entry) {
+        if (!event.isPopupTrigger()) {
+            return;
+        }
+        javax.swing.JPopupMenu menu = Widgets.menu();
+        boolean text = (entry.type == ChatProtocol.TYPE_TEXT || entry.type == ChatProtocol.TYPE_PRIVATE) && !entry.stored();
+        if (text) {
+            menu.add(Widgets.menuItem("Edit message", null)).addActionListener(action -> attachments.edit(entry));
+        }
+        menu.add(Widgets.menuItem("Delete message", null)).addActionListener(action -> attachments.delete(entry));
+        menu.show(event.getComponent(), event.getX(), event.getY());
     }
 
     private JComponent content(ChatEntry entry) {

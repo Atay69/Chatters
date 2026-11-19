@@ -202,6 +202,7 @@ final class Widgets {
         private Theme.Role textRole;
         private Color backgroundOverride;
         private int corner = 12;
+        private final Animation.HoverFade fade = new Animation.HoverFade(this);
 
         Button(String text, Theme.Role background, Theme.Role textRole) {
             super(text);
@@ -214,6 +215,7 @@ final class Widgets {
             setFont(Theme.font(Font.BOLD, 11));
             setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            addChangeListener(event -> fade.setHover(getModel().isRollover())); // the shading glides in and out
         }
 
         void setTextRole(Theme.Role role) {
@@ -247,9 +249,10 @@ final class Widgets {
                     g.setColor(fill);
                     g.fillRoundRect(0, 0, getWidth(), getHeight(), corner, corner);
                 }
-                if (isEnabled() && (getModel().isRollover() || getModel().isPressed())) { // hover / press shading
-                    g.setColor(Theme.dark ? new Color(255, 255, 255, getModel().isPressed() ? 60 : 34)
-                            : new Color(0, 0, 0, getModel().isPressed() ? 50 : 28));
+                if (isEnabled() && (fade.level() > 0 || getModel().isPressed())) { // hover / press shading (hover fades in and out)
+                    int hoverAlpha = Math.round((Theme.dark ? 34 : 28) * fade.level());
+                    int alpha = getModel().isPressed() ? (Theme.dark ? 60 : 50) : hoverAlpha;
+                    g.setColor(Theme.dark ? new Color(255, 255, 255, alpha) : new Color(0, 0, 0, alpha));
                     g.fillRoundRect(0, 0, getWidth(), getHeight(), corner, corner);
                 }
             } finally {
@@ -282,6 +285,75 @@ final class Widgets {
         item.setBorder(BorderFactory.createEmptyBorder(8, 14, 8, 22));
         item.addChangeListener(event -> item.setBackground(item.isArmed() ? lit : normal));
         return item;
+    }
+
+    /** The same colour, but with its see-through amount multiplied by {@code factor} (0 = invisible, 1 = unchanged). */
+    static Color fadeColor(Color color, float factor) {
+        return new Color(color.getRed(), color.getGreen(), color.getBlue(), Math.round(color.getAlpha() * Math.max(0f, Math.min(1f, factor))));
+    }
+
+    /**
+     * Wraps one row of the message list so it can slide and fade in when a new message arrives
+     * (appear) and fade out while the list closes the gap when a message is deleted (disappear).
+     */
+    static class AnimatedRow extends JPanel {
+        private static final long serialVersionUID = 1L;
+        private float alpha = 1f;          // 1 = fully visible
+        private int offset;                // pixels the row is still below its final place
+        private double heightFactor = 1;   // 1 = full height, 0 = no height left
+
+        AnimatedRow(JComponent row) {
+            super(new java.awt.BorderLayout());
+            setOpaque(false);
+            setAlignmentX(Component.LEFT_ALIGNMENT);
+            add(row, java.awt.BorderLayout.CENTER);
+        }
+
+        void appear() {
+            alpha = 0f;
+            offset = 16;
+            Animation.run(240, progress -> {
+                alpha = (float) progress;
+                offset = (int) Math.round((1 - progress) * 16);
+                repaint();
+            }, null);
+        }
+
+        void disappear(Runnable done) {
+            Animation.run(260, progress -> {
+                alpha = (float) (1 - progress);
+                heightFactor = 1 - progress;
+                revalidate();
+                repaint();
+            }, done);
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            Dimension size = super.getPreferredSize();
+            return new Dimension(size.width, (int) Math.round(size.height * heightFactor));
+        }
+
+        @Override
+        public Dimension getMaximumSize() {
+            return new Dimension(Short.MAX_VALUE, getPreferredSize().height);
+        }
+
+        @Override
+        public void paint(Graphics graphics) {
+            if (alpha >= 1f && offset == 0) {
+                super.paint(graphics);
+                return;
+            }
+            Graphics2D g = (Graphics2D) graphics.create();
+            try {
+                g.setComposite(java.awt.AlphaComposite.SrcOver.derive(Math.max(0f, Math.min(1f, alpha))));
+                g.translate(0, offset);
+                super.paint(g);
+            } finally {
+                g.dispose();
+            }
+        }
     }
 
     /** A message list that always has the width of the chat area (no sideways scrolling). */

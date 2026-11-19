@@ -128,7 +128,7 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         Theme.dark = Settings.getBoolean("darkMode." + username, Settings.getBoolean("darkMode", true));
         Theme.accentIndex = Settings.getInt("accent." + username, 0) % Theme.ACCENT_NAMES.length;
         this.wallpapers = new WallpaperManager(WallpaperManager.defaultUserFolder(), Settings.getInt("wallpaper." + username, Settings.getInt("wallpaper", -1)));
-        this.messages = new MessageView(frame, username, new MessageView.Attachments() {
+        this.messages = new MessageView(frame, username, new MessageView.Host() {
             @Override
             public void fetch(ChatEntry entry, java.util.function.Consumer<byte[]> done) {
                 fetchFile(entry, done);
@@ -137,6 +137,16 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
             @Override
             public void download(ChatEntry entry) {
                 downloadFile(entry);
+            }
+
+            @Override
+            public void edit(ChatEntry entry) {
+                composer.startEditing(entry);
+            }
+
+            @Override
+            public void delete(ChatEntry entry) {
+                deleteMessage(entry);
             }
         });
         this.composer = new Composer(this);
@@ -244,6 +254,7 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
 
     /** Shows the open conversation: the header, the people list, and all its messages. */
     private void showConversation() {
+        composer.cancelEditing(); // an unfinished edit belongs to the conversation you are leaving
         composer.clearSuggestions();
         messages.setShowNames(activePeer == null);
         refreshPeople();
@@ -318,7 +329,7 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         if (!open) {
             return;
         }
-        messages.add(entry);
+        messages.add(entry, live); // live messages slide in; the saved history just appears
         boolean chatText = entry.type == ChatProtocol.TYPE_TEXT || entry.type == ChatProtocol.TYPE_PRIVATE;
         if (aiAvailable && live && chatText && fromOthers) {
             composer.requestSuggestions(); // the AI may offer reply suggestions
@@ -346,6 +357,10 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         } else if (type == ChatProtocol.TYPE_AVATAR) {
             ProfileAvatar.setPicture(packet.sender, packet.data); // somebody (maybe me) chose a new picture
             frame.repaint();
+        } else if (type == ChatProtocol.TYPE_MSG_EDITED) {
+            applyEdit(packet);
+        } else if (type == ChatProtocol.TYPE_MSG_DELETED) {
+            applyDelete(packet);
         } else if (type == ChatProtocol.TYPE_AI_REPLY) {
             showAiReply(packet.metadata);
         } else if (type == ChatProtocol.TYPE_TRANSFER_STATUS) {
@@ -354,14 +369,14 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
             // metadata holds the recipient; the other person of the chat is the "peer"
             String peer = packet.sender.equalsIgnoreCase(username) ? packet.metadata : packet.sender;
             String text = new String(packet.data, StandardCharsets.UTF_8);
-            receive(new ChatEntry(packet.sender, packet.timestamp, text, type, packet.data), peer);
+            receive(new ChatEntry(packet.sender, packet.timestamp, text, type, packet.data, packet.id), peer);
         } else if (type == ChatProtocol.TYPE_PRIVATE_AUDIO) {
             String peer = packet.sender.equalsIgnoreCase(username) ? packet.metadata : packet.sender;
             // shown like a GroupChat voice message (type AUDIO), but kept in the private conversation
-            receive(new ChatEntry(packet.sender, packet.timestamp, "voice_message.wav", ChatProtocol.TYPE_AUDIO, packet.data), peer);
+            receive(new ChatEntry(packet.sender, packet.timestamp, "voice_message.wav", ChatProtocol.TYPE_AUDIO, packet.data, packet.id), peer);
         } else if (type == ChatProtocol.TYPE_TEXT || type == ChatProtocol.TYPE_IMAGE || type == ChatProtocol.TYPE_FILE
                 || type == ChatProtocol.TYPE_AUDIO || type == ChatProtocol.TYPE_SYSTEM) {
-            receive(new ChatEntry(packet.sender, packet.timestamp, packet.metadata, type, packet.data), null);
+            receive(new ChatEntry(packet.sender, packet.timestamp, packet.metadata, type, packet.data, packet.id), null);
         }
     }
 
@@ -375,6 +390,76 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
             composer.append(text);
         } else {
             notice(text);
+        }
+    }
+
+    // ---------------------------------------------------------------- editing and deleting messages
+
+    /** The messages of the conversation an edit/delete packet belongs to (null if we never saw that conversation). */
+    private List<ChatEntry> entriesOf(ChatProtocol.Packet packet) {
+        if (packet.metadata.isEmpty()) {
+            return groupEntries;
+        }
+        return privateEntries.get(peerOf(packet).toLowerCase(Locale.ROOT));
+    }
+
+    /** The other person of a private message packet (metadata = recipient, sender = author). */
+    private String peerOf(ChatProtocol.Packet packet) {
+        return packet.sender.equalsIgnoreCase(username) ? packet.metadata : packet.sender;
+    }
+
+    private boolean isOpen(ChatProtocol.Packet packet) {
+        return packet.metadata.isEmpty() ? activePeer == null : peerOf(packet).equalsIgnoreCase(activePeer);
+    }
+
+    /** A message was edited (by me or by the other person): swap its text and show the "edited" label. */
+    private void applyEdit(ChatProtocol.Packet packet) {
+        List<ChatEntry> entries = entriesOf(packet);
+        if (entries == null || packet.id == 0) {
+            return;
+        }
+        String text = new String(packet.data, StandardCharsets.UTF_8);
+        for (int i = 0; i < entries.size(); i++) {
+            if (entries.get(i).id == packet.id) {
+                entries.set(i, entries.get(i).withText(text));
+                sidebar.update(people, activePeer); // the list may show this message as its preview
+                if (isOpen(packet)) {
+                    refreshMessages();
+                }
+                return;
+            }
+        }
+    }
+
+    /** A message was deleted: it disappears from the list (with a short fade) and from the preview. */
+    private void applyDelete(ChatProtocol.Packet packet) {
+        List<ChatEntry> entries = entriesOf(packet);
+        if (entries == null || packet.id == 0) {
+            return;
+        }
+        for (int i = 0; i < entries.size(); i++) {
+            if (entries.get(i).id == packet.id) {
+                ChatEntry removed = entries.remove(i);
+                sidebar.update(people, activePeer);
+                if (isOpen(packet)) {
+                    messages.remove(removed);
+                }
+                return;
+            }
+        }
+    }
+
+    /** "Delete message": asks first, then the server removes it for everybody (a stored file is deleted too). */
+    private void deleteMessage(ChatEntry entry) {
+        int answer = JOptionPane.showConfirmDialog(frame, "Delete this message for everybody?", "Delete message",
+                JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (answer != JOptionPane.YES_OPTION) {
+            return;
+        }
+        try {
+            client.deleteMessage(activePeer, entry.id);
+        } catch (IOException error) {
+            connectionLost(error);
         }
     }
 

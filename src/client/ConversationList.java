@@ -67,21 +67,22 @@ final class ConversationList extends JPanel {
     }
 
     private JComponent row(String peer, Integer status, boolean selected) {
-        boolean[] hover = { false };
+        Animation.HoverFade[] fade = new Animation.HoverFade[1]; // created below, once the row exists
         JPanel row = new JPanel(new BorderLayout(12, 0)) {
             private static final long serialVersionUID = 1L;
 
             @Override
             protected void paintComponent(Graphics graphics) {
-                if (selected || hover[0]) {
+                if (selected || fade[0].level() > 0) {
                     Graphics2D g = (Graphics2D) graphics.create();
                     g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                    g.setColor((selected ? Theme.Role.SELECTED : Theme.Role.CONTROL).color());
+                    g.setColor(selected ? Theme.Role.SELECTED.color() : Widgets.fadeColor(Theme.Role.CONTROL.color(), fade[0].level()));
                     g.fillRoundRect(0, 0, getWidth(), getHeight(), 18, 18);
                     g.dispose();
                 }
             }
         };
+        fade[0] = new Animation.HoverFade(row);
         row.setOpaque(false);
         row.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
         row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 66));
@@ -126,14 +127,12 @@ final class ConversationList extends JPanel {
 
             @Override
             public void mouseEntered(MouseEvent event) {
-                hover[0] = true;
-                row.repaint();
+                fade[0].setHover(true);
             }
 
             @Override
             public void mouseExited(MouseEvent event) {
-                hover[0] = false;
-                row.repaint();
+                fade[0].setHover(false);
             }
         });
         return row;

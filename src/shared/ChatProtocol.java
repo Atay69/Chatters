@@ -56,6 +56,18 @@ public final class ChatProtocol {
     public static final byte TYPE_FILE_DATA = 22;   // server -> client: long request number, int length, then a piece of the file
     public static final byte TYPE_FILE_DONE = 23;   // server -> client: long request number, byte 1 = complete, 0 = failed
 
+    // ---- editing and deleting messages (only your own) ----
+    public static final byte TYPE_MSG_EDIT = 24;     // client -> server: UTF conversation ("" = GroupChat, else the other person), long message id, UTF new text
+    public static final byte TYPE_MSG_DELETE = 25;   // client -> server: UTF conversation, long message id
+    public static final byte TYPE_MSG_EDITED = 26;   // server -> client: sender = author, metadata = recipient ("" = GroupChat), id, bytes = the new text
+    public static final byte TYPE_MSG_DELETED = 27;  // server -> client: sender = author, metadata = recipient ("" = GroupChat), id
+
+    /** Message packets carry the id of the message (a long written after the metadata), so it can be edited or deleted later. */
+    public static boolean hasMessageId(byte type) {
+        return type == TYPE_TEXT || type == TYPE_IMAGE || type == TYPE_FILE || type == TYPE_AUDIO
+                || type == TYPE_PRIVATE || type == TYPE_PRIVATE_AUDIO || type == TYPE_MSG_EDITED || type == TYPE_MSG_DELETED;
+    }
+
     /** Size of the pieces a file is cut into (never more than MAX_CHUNK_BYTES). */
     public static final int FILE_CHUNK_BYTES = 256 * 1024;
     public static final int MAX_CHUNK_BYTES = 4 * 1024 * 1024;
@@ -82,7 +94,7 @@ public final class ChatProtocol {
     public static boolean carriesBytes(byte type) {
         return type == TYPE_IMAGE || type == TYPE_FILE || type == TYPE_AUDIO || type == TYPE_PRIVATE
                 || type == TYPE_PRIVATE_AUDIO || type == TYPE_AUTH || type == TYPE_USER_PRESENCE || type == TYPE_USER_LIST
-                || type == TYPE_AI_REPLY || type == TYPE_AVATAR;
+                || type == TYPE_AI_REPLY || type == TYPE_AVATAR || type == TYPE_MSG_EDITED;
     }
 
     public static byte[] encodeUserList(List<UserRecord> users) throws IOException {
@@ -120,8 +132,14 @@ public final class ChatProtocol {
         public final String timestamp;
         public final String metadata;
         public final byte[] data;
+        public final long id;     // the id of a chat message (see hasMessageId); 0 for other packets
 
         public Packet(byte type, String sender, String timestamp, String metadata, byte[] data) {
+            this(type, sender, timestamp, metadata, data, 0);
+        }
+
+        public Packet(byte type, String sender, String timestamp, String metadata, byte[] data, long id) {
+            this.id = id;
             this.type = type;
             this.sender = sender;
             this.timestamp = timestamp;

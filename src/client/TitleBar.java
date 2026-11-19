@@ -89,9 +89,11 @@ final class TitleBar extends Widgets.TintedPanel {
     private static final class TitleButton extends JButton {
         private static final long serialVersionUID = 1L;
         private final Kind kind;
+        private final Animation.HoverFade fade = new Animation.HoverFade(this);
 
         TitleButton(Kind kind, String tooltip, Runnable action) {
             this.kind = kind;
+            addChangeListener(event -> fade.setHover(getModel().isRollover()));
             setPreferredSize(new Dimension(BAR_HEIGHT, BAR_HEIGHT));
             setContentAreaFilled(false);
             setBorderPainted(false);
@@ -106,18 +108,17 @@ final class TitleBar extends Widgets.TintedPanel {
             Graphics2D g = (Graphics2D) graphics.create();
             try {
                 g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                boolean hover = getModel().isRollover();
+                float level = fade.level(); // 0 = mouse away, 1 = mouse over (glides between the two)
                 int cx = getWidth() / 2;
                 int cy = getHeight() / 2;
-                // a round button: grey, or red under the mouse for Close
-                g.setColor(hover && kind == Kind.CLOSE ? new Color(218, 91, 103) : Theme.Role.CONTROL.color());
+                // a round button: grey, turning red for Close (a little lighter for the others) under the mouse
+                g.setColor(Theme.Role.CONTROL.color());
                 g.fillOval(cx - CIRCLE / 2, cy - CIRCLE / 2, CIRCLE, CIRCLE);
-                if (hover && kind != Kind.CLOSE) { // a little lighter under the mouse
-                    g.setColor(Theme.dark ? new Color(255, 255, 255, 34) : new Color(0, 0, 0, 28));
-                    g.fillOval(cx - CIRCLE / 2, cy - CIRCLE / 2, CIRCLE, CIRCLE);
-                }
+                g.setColor(kind == Kind.CLOSE ? Widgets.fadeColor(new Color(218, 91, 103), level)
+                        : Widgets.fadeColor(Theme.dark ? new Color(255, 255, 255, 34) : new Color(0, 0, 0, 28), level));
+                g.fillOval(cx - CIRCLE / 2, cy - CIRCLE / 2, CIRCLE, CIRCLE);
                 // the symbol inside the circle
-                g.setColor(hover && kind == Kind.CLOSE ? Color.WHITE : Theme.Role.TEXT.color());
+                g.setColor(level > 0.5f && kind == Kind.CLOSE ? Color.WHITE : Theme.Role.TEXT.color());
                 g.setStroke(new BasicStroke(1.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
                 if (kind == Kind.MINIMIZE) {
                     g.drawLine(cx - 4, cy + 2, cx + 4, cy + 2);

@@ -177,3 +177,22 @@ PROJECT_GUIDE.md                     the beginner guide;  DEVELOPMENT_LOG.md = t
 **Files over 2 GB**
 * The transfer was already chunked (256 KB pieces, 64-bit sizes, straight to disk on the server). Tested with a 2.64 GB file (2,831,155,200 bytes) against a server limited to 64 MB of memory: upload 6.7 s (about 400 MB/s on one computer), download 12.1 s, size equal and SHA-256 identical.
 * There is no speed cap in the program: a transfer goes as fast as the network allows (a gigabit LAN is roughly 110 MB/s at best). A fixed "64 MB/s" setting would only slow it down; very large chunks (like 64 MB) would hurt cancelling and progress, which is why chunks stay at 256 KB.
+
+---
+
+## 8. Update – edit and delete messages, and smooth animations
+
+**Edit / delete (your own messages only)**
+* Every chat message now has an **id** (GroupChat and private chats count separately, ids are never reused). Message packets carry it (`ChatProtocol.hasMessageId`; `Packet.id`). Old saved messages get ids from their position in the files, so nothing has to be converted.
+* **Right-click your own message** → *Edit message* (text messages only) or *Delete message* (asks "Delete this message for everybody?"). Editing puts the text back in the message box: the Send button becomes **Save**, Enter saves, **Esc** cancels; leaving the conversation cancels too.
+* Network: `TYPE_MSG_EDIT` (24) and `TYPE_MSG_DELETE` (25) from the client; the server answers everybody concerned (GroupChat = everybody, private chat = only the two people) with `TYPE_MSG_EDITED` (26) / `TYPE_MSG_DELETED` (27).
+* Server (`ClientHandler.handleMessageEdit/Delete`): refuses anyone but the author, refuses editing file/voice messages and empty or too long texts; deleting a message that points to a stored file **also deletes the file from the server's disk**.
+* Saved for good: edits and deletes are appended to `group-changes.bin` / `private-changes.bin` (`ChangeLog`) and replayed when the server starts. The history sends the newest text, plus an "edited" packet so the label survives a restart.
+* An edited message shows **"edited · 18:40"** in its bubble.
+* Tested with a real server: strangers cannot edit/delete, empty edits are refused, private edits/deletes reach only the two people, deleting a file message removes the file, and a restarted server shows the edited text, hides the deleted messages and keeps the ids.
+
+**Animations (`Animation`, `Widgets.AnimatedRow`)**
+* New messages **slide up and fade in**; the chat **scrolls down smoothly** instead of jumping.
+* A deleted message **fades out while the messages below it slide up**.
+* Hover effects **glide** instead of flashing: all buttons, the Messages list rows, the title-bar buttons and the profile card (`Animation.HoverFade`).
+* Saved history and switching conversations still appear instantly (no animation) so they stay fast.

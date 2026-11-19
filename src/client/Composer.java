@@ -205,7 +205,12 @@ final class Composer extends Widgets.TintedPanel {
             return;
         }
         try {
-            host.client().sendText(text, host.activePeer());
+            if (editing != null) { // "Save": the text replaces the message that is being edited
+                host.client().editMessage(host.activePeer(), editing.id, text);
+                finishEditing();
+            } else {
+                host.client().sendText(text, host.activePeer());
+            }
             input.setText("");
             clearSuggestions();
         } catch (IOException error) {
@@ -370,6 +375,33 @@ final class Composer extends Widgets.TintedPanel {
         sendAiQuery(ChatProtocol.AI_SUGGEST, "");
     }
 
+    // ---------------------------------------------------------------- editing one of my messages
+
+    private ChatEntry editing; // the message being edited (null = a normal new message)
+
+    /** "Edit message": puts its text in the box; Enter / Send now saves the change, Esc cancels. */
+    void startEditing(ChatEntry entry) {
+        editing = entry;
+        input.setText(entry.text);
+        input.requestFocusInWindow();
+        sendButton.setText("Save");
+        showStatus("Editing your message: press Enter or Save to keep the change, Esc to cancel.", false);
+    }
+
+    /** Leaves edit mode without saving (Esc, or you opened another conversation). */
+    void cancelEditing() {
+        if (editing != null) {
+            finishEditing();
+            input.setText("");
+        }
+    }
+
+    private void finishEditing() {
+        editing = null;
+        sendButton.setText("Send");
+        showStatus(" ", false);
+    }
+
     // ---------------------------------------------------------------- the message box
 
     private void setupInput() {
@@ -390,6 +422,15 @@ final class Composer extends Widgets.TintedPanel {
             }
         });
         // Enter sends, Shift+Enter inserts a new line
+        input.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "cancelEdit");
+        input.getActionMap().put("cancelEdit", new AbstractAction() {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                cancelEditing();
+            }
+        });
         input.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "send");
         input.getActionMap().put("send", new AbstractAction() {
             private static final long serialVersionUID = 1L;

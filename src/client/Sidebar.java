@@ -112,22 +112,23 @@ final class Sidebar extends Widgets.TintedPanel {
     }
 
     private JPanel profileCard(String username) {
-        boolean[] hover = { false };  // true while the mouse is over the card
+        Animation.HoverFade[] fade = new Animation.HoverFade[1];  // glides to 1 while the mouse is over the card
         Widgets.TintedPanel card = new Widgets.TintedPanel(new BorderLayout(12, 0), Theme.Role.CONTROL, 26) {
             private static final long serialVersionUID = 1L;
 
             @Override
             protected void paintComponent(Graphics graphics) {
                 super.paintComponent(graphics);
-                if (hover[0]) { // a little darker under the mouse
+                if (fade[0].level() > 0) { // a little darker under the mouse
                     Graphics2D g = (Graphics2D) graphics;
                     g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                    g.setColor(new Color(0, 0, 0, 55));
+                    g.setColor(new Color(0, 0, 0, Math.round(55 * fade[0].level())));
                     g.fillRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 26, 26);
                 }
             }
         };
         card.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 14));
+        fade[0] = new Animation.HoverFade(card);
         Widgets.Label name = new Widgets.Label(ProfileNameFormatter.format(username) + "  (you)", Theme.Role.TEXT);
         name.setFont(Theme.font(Font.BOLD, 13));
         Widgets.Label state = new Widgets.Label("", Theme.Role.ONLINE);
@@ -163,7 +164,7 @@ final class Sidebar extends Widgets.TintedPanel {
         card.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseEntered(MouseEvent event) {
-                hover[0] = true;
+                fade[0].setHover(true);
                 state.setText("Change profile picture");
                 state.setRole(Theme.Role.TEXT);
                 card.repaint();
@@ -174,7 +175,7 @@ final class Sidebar extends Widgets.TintedPanel {
                 if (card.contains(event.getPoint())) {
                     return; // only moved onto the status symbol, still inside the card
                 }
-                hover[0] = false;
+                fade[0].setHover(false);
                 showMyStatus.run();
                 card.repaint();
             }

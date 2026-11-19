@@ -146,6 +146,7 @@ public final class ChatClient implements AutoCloseable {
                     String sender = input.readUTF();
                     String timestamp = input.readUTF();
                     String metadata = input.readUTF();
+                    long id = ChatProtocol.hasMessageId(type) ? input.readLong() : 0;
                     byte[] data = new byte[0];
                     if (ChatProtocol.carriesBytes(type)) {
                         int length = input.readInt();
@@ -155,7 +156,7 @@ public final class ChatClient implements AutoCloseable {
                         data = new byte[length];
                         input.readFully(data);
                     }
-                    ChatProtocol.Packet packet = new ChatProtocol.Packet(type, sender, timestamp, metadata, data);
+                    ChatProtocol.Packet packet = new ChatProtocol.Packet(type, sender, timestamp, metadata, data, id);
                     SwingUtilities.invokeLater(() -> listener.onPacket(packet));
                 }
             } catch (IOException error) {
@@ -196,6 +197,27 @@ public final class ChatClient implements AutoCloseable {
                 output.writeInt(packet.data.length);
                 output.write(packet.data);
             }
+            output.flush();
+        }
+    }
+
+    /** Edits one of my text messages. {@code peer} is null for GroupChat, else the other person of the private chat. */
+    public void editMessage(String peer, long id, String newText) throws IOException {
+        synchronized (output) {
+            output.writeByte(ChatProtocol.TYPE_MSG_EDIT);
+            output.writeUTF(peer == null ? "" : peer);
+            output.writeLong(id);
+            output.writeUTF(newText);
+            output.flush();
+        }
+    }
+
+    /** Deletes one of my messages for everybody. */
+    public void deleteMessage(String peer, long id) throws IOException {
+        synchronized (output) {
+            output.writeByte(ChatProtocol.TYPE_MSG_DELETE);
+            output.writeUTF(peer == null ? "" : peer);
+            output.writeLong(id);
             output.flush();
         }
     }
