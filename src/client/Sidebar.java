@@ -12,7 +12,6 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
-import java.awt.FileDialog;
 import java.awt.Font;
 import java.awt.Frame;
 import java.awt.Graphics;
@@ -69,14 +68,12 @@ final class Sidebar extends Widgets.TintedPanel {
     /** Asks for a picture, cuts it to a square, shrinks it to 128 x 128 and sends it to the server, which shows it to everybody. */
     private void choosePicture(ProfileAvatar avatar) {
         Frame window = (Frame) SwingUtilities.getWindowAncestor(avatar);
-        FileDialog chooser = new FileDialog(window, "Choose your profile picture", FileDialog.LOAD);
-        chooser.setFilenameFilter((directory, name) -> name.toLowerCase().matches(".*\\.(png|jpe?g|gif|bmp)"));
-        chooser.setVisible(true);
-        if (chooser.getFile() == null) {
+        File chosen = NativeFileDialog.openPicture(window, "Choose your profile picture");
+        if (chosen == null) {
             return; // cancelled
         }
         try {
-            BufferedImage source = ImageIO.read(new File(chooser.getDirectory(), chooser.getFile()));
+            BufferedImage source = ImageIO.read(chosen);
             if (source == null) {
                 throw new IOException("That file is not a picture.");
             }

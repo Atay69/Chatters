@@ -16,7 +16,6 @@ import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.FileDialog;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Frame;
@@ -387,14 +386,12 @@ final class MessageView {
 
     /** Asks where to save, then writes the file. */
     private void save(String fileName, byte[] data) {
-        FileDialog chooser = new FileDialog(owner, "Save shared file", FileDialog.SAVE);
-        chooser.setFile(fileName);
-        chooser.setVisible(true);
-        if (chooser.getFile() == null) {
+        File target = NativeFileDialog.save(owner, "Save shared file", fileName);
+        if (target == null) {
             return;
         }
         try {
-            Files.write(new File(chooser.getDirectory(), chooser.getFile()).toPath(), data);
+            Files.write(target.toPath(), data);
         } catch (IOException error) {
             JOptionPane.showMessageDialog(owner, "Failed to save file: " + error.getMessage(),
                     "Save failed", JOptionPane.ERROR_MESSAGE);

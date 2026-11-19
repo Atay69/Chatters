@@ -20,7 +20,6 @@ import javax.sound.sampled.LineUnavailableException;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.FileDialog;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Frame;
@@ -221,13 +220,10 @@ final class Composer extends Widgets.TintedPanel {
     // ---------------------------------------------------------------- files and images
 
     private void chooseFile(boolean imageOnly) {
-        FileDialog chooser = new FileDialog(host.frame(), imageOnly ? "Choose an image to send" : "Choose a file to send", FileDialog.LOAD);
-        if (imageOnly) {
-            chooser.setFilenameFilter((directory, name) -> name.toLowerCase().matches(".*\\.(png|jpe?g|gif|bmp)"));
-        }
-        chooser.setVisible(true);
-        if (chooser.getFile() != null) {
-            upload(imageOnly ? ChatProtocol.TYPE_IMAGE : ChatProtocol.TYPE_FILE, new File(chooser.getDirectory(), chooser.getFile()));
+        File file = imageOnly ? NativeFileDialog.openPicture(host.frame(), "Choose an image to send")
+                : NativeFileDialog.open(host.frame(), "Choose a file to send", "All files");
+        if (file != null) {
+            upload(imageOnly ? ChatProtocol.TYPE_IMAGE : ChatProtocol.TYPE_FILE, file);
         }
     }
 

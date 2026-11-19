@@ -10,13 +10,11 @@ import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
-import java.awt.FileDialog;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Frame;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
@@ -52,7 +50,8 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
     private final ChatClient client;
     private final boolean aiAvailable;
     private final String greeting = GREETINGS[new Random().nextInt(GREETINGS.length)];
-    private final WallpaperManager wallpapers;
+    private final Appearance appearance;       // theme, accent colour, wallpaper (saved per user) and the burger menu
+    private final FileTransfers transfers;     // downloads of stored files
 
     // the conversations
     private final List<ChatEntry> groupEntries = new ArrayList<ChatEntry>();
@@ -124,19 +123,29 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         this.client = client;
         this.username = client.username();
         this.aiAvailable = client.aiAvailable();
-        // the theme, the accent colour and the wallpaper are saved per user: each account keeps its own choices
-        Theme.dark = Settings.getBoolean("darkMode." + username, Settings.getBoolean("darkMode", true));
-        Theme.accentIndex = Settings.getInt("accent." + username, 0) % Theme.ACCENT_NAMES.length;
-        this.wallpapers = new WallpaperManager(WallpaperManager.defaultUserFolder(), Settings.getInt("wallpaper." + username, Settings.getInt("wallpaper", -1)));
+        // first the user's saved look (the widgets read the Theme while they are created), then the parts of the window
+        this.appearance = new Appearance(frame, username, new Appearance.Listener() {
+            @Override
+            public void themeChanged() {
+                refreshPeople();
+                refreshMessages();
+            }
+
+            @Override
+            public void accentChanged() {
+                composer.updateAccent();
+            }
+        }, this::showStatus);
+        this.transfers = new FileTransfers(this, this::showStatus);
         this.messages = new MessageView(frame, username, new MessageView.Host() {
             @Override
             public void fetch(ChatEntry entry, java.util.function.Consumer<byte[]> done) {
-                fetchFile(entry, done);
+                transfers.fetch(entry, done);
             }
 
             @Override
             public void download(ChatEntry entry) {
-                downloadFile(entry);
+                transfers.download(entry);
             }
 
             @Override
@@ -163,7 +172,7 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         card.add(sidebar, BorderLayout.WEST);
         card.add(chatPanel(), BorderLayout.CENTER);
 
-        JPanel root = new Widgets.WallpaperPanel(wallpapers);
+        JPanel root = new Widgets.WallpaperPanel(appearance.wallpapers());
         root.setLayout(new BorderLayout());
         root.setBorder(BorderFactory.createEmptyBorder(28, 28, 28, 28)); // the wallpaper around the card
         root.add(card, BorderLayout.CENTER);
@@ -205,28 +214,9 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         who.add(headerPicture, BorderLayout.WEST);
         who.add(titles, BorderLayout.CENTER);
 
-        // one burger button holds all the appearance options
-        Widgets.Button menuButton = new Widgets.Button("", Theme.Role.CONTROL, Theme.Role.TEXT) {
-            private static final long serialVersionUID = 1L;
-
-            @Override
-            protected void paintComponent(java.awt.Graphics graphics) {
-                super.paintComponent(graphics);
-                java.awt.Graphics2D g = (java.awt.Graphics2D) graphics.create(); // thin outline around the button
-                g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
-                g.setColor(Theme.Role.BORDER.color());
-                g.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 14, 14);
-                g.dispose();
-            }
-        };
-        menuButton.setIcon(new LineIcon(LineIcon.Kind.MENU, 24));
-        menuButton.setCorner(14);
-        menuButton.setPreferredSize(new Dimension(40, 40));
-        menuButton.setToolTipText("Wallpaper, colour and theme");
-        menuButton.addActionListener(event -> showMenu(menuButton));
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
         buttons.setOpaque(false);
-        buttons.add(menuButton);
+        buttons.add(appearance.menuButton()); // one burger button holds all the appearance options
 
         Widgets.TintedPanel header = new Widgets.TintedPanel(new BorderLayout(), Theme.Role.COMPOSER).edges("B");
         header.setBorder(BorderFactory.createEmptyBorder(14, 26, 14, 26));
@@ -496,132 +486,8 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         receive(new ChatEntry("SYSTEM", now, text, ChatProtocol.TYPE_SYSTEM, new byte[0]), activePeer);
     }
 
-    // ---------------------------------------------------------------- files stored on the server
-
-    private static final int MAX_CACHED_FILE_BYTES = 16 * 1024 * 1024;
-    private final Map<Long, byte[]> loadedFiles = new HashMap<Long, byte[]>(); // small downloads, so redrawing does not download again
-
-    /** Downloads a whole file into memory (a picture to show, a voice message to play). */
-    private void fetchFile(ChatEntry entry, java.util.function.Consumer<byte[]> done) {
-        byte[] cached = loadedFiles.get(entry.fileId);
-        if (cached != null) {
-            done.accept(cached);
-            return;
-        }
-        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
-        try {
-            client.download(entry.fileId, entry.fileSize, buffer, new ChatClient.TransferListener() {
-                @Override
-                public void onProgress(long received, long total) {
-                }
-
-                @Override
-                public void onComplete() {
-                    byte[] bytes = buffer.toByteArray();
-                    if (bytes.length <= MAX_CACHED_FILE_BYTES) {
-                        loadedFiles.put(entry.fileId, bytes);
-                    }
-                    done.accept(bytes);
-                }
-
-                @Override
-                public void onFailure(IOException error) {
-                    composer.showStatus("Could not load " + entry.text + ".", true);
-                }
-            });
-        } catch (IOException error) {
-            connectionLost(error);
-        }
-    }
-
-    /** "Download": asks where to save the file, then streams it there while the chat keeps working. */
-    private void downloadFile(ChatEntry entry) {
-        FileDialog chooser = new FileDialog(frame, "Save shared file", FileDialog.SAVE);
-        chooser.setFile(entry.text);
-        chooser.setVisible(true);
-        if (chooser.getFile() == null) {
-            return;
-        }
-        File target = new File(chooser.getDirectory(), chooser.getFile());
-        try {
-            client.download(entry.fileId, entry.fileSize,
-                    new java.io.BufferedOutputStream(new java.io.FileOutputStream(target), 1024 * 1024),
-                    new ChatClient.TransferListener() {
-                        @Override
-                        public void onProgress(long received, long total) {
-                            int percent = total == 0 ? 100 : (int) (received * 100 / total);
-                            composer.showStatus("Downloading " + entry.text + " (" + percent + "%)...", false);
-                        }
-
-                        @Override
-                        public void onComplete() {
-                            composer.showStatus("Saved " + entry.text + " to " + target.getParent(), false);
-                        }
-
-                        @Override
-                        public void onFailure(IOException error) {
-                            composer.showStatus("Could not download " + entry.text + ": " + error.getMessage(), true);
-                        }
-                    });
-        } catch (IOException error) {
-            JOptionPane.showMessageDialog(frame, "Could not save the file: " + error.getMessage(),
-                    "Download failed", JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
-    // ---------------------------------------------------------------- theme and wallpaper
-
-    /** The burger menu: every appearance option in one place. */
-    private void showMenu(Widgets.Button anchor) {
-        javax.swing.JPopupMenu menu = Widgets.menu();
-        String color = Theme.ACCENT_NAMES[Theme.accentIndex];
-        menu.add(Widgets.menuItem("Add wallpaper...", null)).addActionListener(event -> addWallpaper());
-        menu.add(Widgets.menuItem("Next wallpaper  (" + wallpapers.name() + ")", null)).addActionListener(event -> cycleWallpaper());
-        menu.add(Widgets.menuItem("Color: " + color, null)).addActionListener(event -> nextAccent());
-        menu.add(Widgets.menuItem(Theme.dark ? "Light mode" : "Dark mode", null)).addActionListener(event -> toggleTheme());
-        menu.show(anchor, anchor.getWidth() - menu.getPreferredSize().width, anchor.getHeight() + 6);
-    }
-
-    private void toggleTheme() {
-        Theme.dark = !Theme.dark;
-        Settings.putBoolean("darkMode." + username, Theme.dark);
-        refreshPeople();
-        refreshMessages(); // the messages are re-created with the new theme's colours
-        frame.repaint();
-    }
-
-    /** "Color": the next accent colour for the Send button and outlines (saved for this user). */
-    private void nextAccent() {
-        Theme.accentIndex = (Theme.accentIndex + 1) % Theme.ACCENT_NAMES.length;
-        Settings.putInt("accent." + username, Theme.accentIndex);
-        composer.updateAccent();
-        frame.repaint();
-    }
-
-    private void cycleWallpaper() {
-        wallpapers.next();
-        wallpaperChanged();
-    }
-
-    /** "+ Wallpaper": pick a picture; it is saved in your own wallpapers folder (on this computer) and shown right away. */
-    private void addWallpaper() {
-        FileDialog chooser = new FileDialog(frame, "Choose a picture to use as a wallpaper", FileDialog.LOAD);
-        chooser.setFilenameFilter((directory, name) -> name.toLowerCase().matches(".*\\.(png|jpe?g|gif|bmp)"));
-        chooser.setVisible(true);
-        if (chooser.getFile() == null) {
-            return;
-        }
-        try {
-            wallpapers.add(new File(chooser.getDirectory(), chooser.getFile()).toPath());
-            wallpaperChanged();
-            composer.showStatus("Wallpaper added: " + wallpapers.name(), false);
-        } catch (IOException error) {
-            JOptionPane.showMessageDialog(frame, error.getMessage(), "Could not add wallpaper", JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
-    private void wallpaperChanged() {
-        Settings.putInt("wallpaper." + username, wallpapers.index());
-        frame.repaint();
+    /** Shows a progress or error line above the message box. */
+    private void showStatus(String text, boolean error) {
+        composer.showStatus(text, error);
     }
 }

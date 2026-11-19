@@ -93,14 +93,6 @@ public final class UserStore {
         return MessageDigest.isEqual(expected, actual) ? record[0] : null;
     }
 
-    /**
-     * Remember tokens must be random, revocable, stored as hashes, and delivered
-     * only over authenticated TLS; never persist or log the raw token.
-     */
-    public String issueRememberToken(String user) {
-        throw new UnsupportedOperationException("Remember tokens are not configured.");
-    }
-
     private static String key(String name) {
         return name.toLowerCase(Locale.ROOT);
     }

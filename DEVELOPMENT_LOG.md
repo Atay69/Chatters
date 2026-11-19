@@ -196,3 +196,12 @@ PROJECT_GUIDE.md                     the beginner guide;  DEVELOPMENT_LOG.md = t
 * A deleted message **fades out while the messages below it slide up**.
 * Hover effects **glide** instead of flashing: all buttons, the Messages list rows, the title-bar buttons and the profile card (`Animation.HoverFade`).
 * Saved history and switching conversations still appear instantly (no animation) so they stay fast.
+
+---
+
+## 9. Update – modern Windows file window, code organised, Function.md
+
+* **File windows:** Java's `FileDialog` is the old Windows 7 look. New `NativeFileDialog` opens the real modern Windows "Open" / "Save as" window (through a small PowerShell script using WinForms), with a fallback to Java's dialog on other systems. It replaced the four separate file dialogs (attach/image, profile picture, add wallpaper, Download). Tested end to end: choosing a file in the modern window uploaded it, and the Download button saved it through the modern Save window (123,456 bytes both ways).
+* **Organisation:** `ChatWindow` shrank from about 630 to about 490 lines. `Appearance` (theme, accent colour, wallpaper, burger menu) and `FileTransfers` (fetch and Download of stored files) were split out. The dead "remember token" stub in `UserStore` was removed.
+* **Function.md:** a new file explaining each important implementation in simple words. It is updated with every change from now on.
+* **Mistake during testing (disclosed):** a screen-automation test (simulated mouse and keyboard) of the edit/delete menu sent its input to the user's Discord window instead of the test window. From now on no tests send real mouse/keyboard input on the user's screen; checks use protocol tests and offscreen rendering instead.

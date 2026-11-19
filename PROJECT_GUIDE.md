@@ -57,6 +57,8 @@ chatter-data/ everything the server saves (created automatically)
 | `Widgets`, `Theme` | Small reusable pieces (glass card, bubble, buttons, panels), and all the colours (dark = black glass, light = white glass) |
 | `Emoji`, `EmojiPicker` | The emoji pictures, and the popup to pick one |
 | `WallpaperManager` | Wallpapers: cycle, add, soften |
+| `NativeFileDialog` | The real modern Windows "Open" / "Save as" window (falls back to Java's) |
+| `Appearance`, `FileTransfers` | Theme / accent / wallpaper + burger menu; stored-file fetch and Download (split out of `ChatWindow`) |
 | `Animation` | Small helpers for smooth movement (slide/fade in, glide on hover) |
 | `LineIcon` | The file, image, emoji, microphone and AI icons, drawn in code in the theme colour |
 | `StatusIcon` | The status symbols: green circle (online), white half moon (away), grey circle (invisible/offline), red circle with a line (do not disturb) |

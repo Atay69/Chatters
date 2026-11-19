@@ -106,6 +106,7 @@ src/
   images/ emoji/ wallpapers/     🎨 pictures
 Chatter.jar          📦 ready-to-run client (Java 8+)
 chatter-data/        🔒 created by the server: accounts, history, avatars, files (never committed)
+Function.md          🧩 every important part explained in simple words (kept up to date)
 PROJECT_GUIDE.md     📖 beginner guide to the code
 DEVELOPMENT_LOG.md   📝 everything that was built and why
 ```
