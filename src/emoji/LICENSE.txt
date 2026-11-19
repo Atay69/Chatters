@@ -1,0 +1,3 @@
+Emoji artwork: Noto Emoji by Google (https://github.com/googlefonts/noto-emoji), release v2.047.
+The emoji images are licensed under the Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+The 44 px and 22 px folders are the same pictures scaled down for use inside chat messages.
