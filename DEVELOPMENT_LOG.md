@@ -163,3 +163,17 @@ PROJECT_GUIDE.md                     the beginner guide;  DEVELOPMENT_LOG.md = t
 * The window cannot be resized by dragging its edges (custom title bar) – use the full-screen button.
 * The saved history is read completely into memory when the server starts; stored files are not, but they are never deleted (the files folder grows).
 * Test servers started by the assistant during development may still be running on ports 5077–5082; they use temporary data and can be closed in Task Manager.
+
+---
+
+## 7. Update – wallpapers on every computer, and files over 2 GB verified
+
+**Wallpapers (`WallpaperManager`)**
+* The 12 default wallpapers moved from the project's `wallpapers/` folder into `src/wallpapers/` and are listed in `src/wallpapers/list.txt`. They are now part of the program (and of `Chatter.jar`, which grew from 1.9 MB to 9.9 MB), so another computer has the same defaults without copying anything.
+* "Add wallpaper" (burger menu) now saves the user's picture in `<home folder>/.chatters/wallpapers/` on that computer. It rejects files that are not pictures, remembers the choice per account (`wallpaper.<name>`), and the added pictures come back on the next start. The menu cycles through defaults first, then the user's own, then "Off".
+* To give everybody a new default wallpaper: put the file in `src/wallpapers/`, add its name to `list.txt`, rebuild the jar.
+* Checked on a simulated fresh computer (empty home folder): the 12 defaults load from the jar, adding works and survives a restart.
+
+**Files over 2 GB**
+* The transfer was already chunked (256 KB pieces, 64-bit sizes, straight to disk on the server). Tested with a 2.64 GB file (2,831,155,200 bytes) against a server limited to 64 MB of memory: upload 6.7 s (about 400 MB/s on one computer), download 12.1 s, size equal and SHA-256 identical.
+* There is no speed cap in the program: a transfer goes as fast as the network allows (a gigabit LAN is roughly 110 MB/s at best). A fixed "64 MB/s" setting would only slow it down; very large chunks (like 64 MB) would hurt cancelling and progress, which is why chunks stay at 256 KB.

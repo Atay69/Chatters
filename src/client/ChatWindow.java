@@ -19,7 +19,6 @@ import java.awt.event.WindowEvent;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -128,7 +127,7 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         // the theme, the accent colour and the wallpaper are saved per user: each account keeps its own choices
         Theme.dark = Settings.getBoolean("darkMode." + username, Settings.getBoolean("darkMode", true));
         Theme.accentIndex = Settings.getInt("accent." + username, 0) % Theme.ACCENT_NAMES.length;
-        this.wallpapers = new WallpaperManager(Paths.get("wallpapers"), Settings.getInt("wallpaper." + username, Settings.getInt("wallpaper", -1)));
+        this.wallpapers = new WallpaperManager(WallpaperManager.defaultUserFolder(), Settings.getInt("wallpaper." + username, Settings.getInt("wallpaper", -1)));
         this.messages = new MessageView(frame, username, new MessageView.Attachments() {
             @Override
             public void fetch(ChatEntry entry, java.util.function.Consumer<byte[]> done) {
@@ -519,7 +518,7 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         wallpaperChanged();
     }
 
-    /** "+ Wallpaper": pick a picture; it is copied into the wallpapers folder and shown right away. */
+    /** "+ Wallpaper": pick a picture; it is saved in your own wallpapers folder (on this computer) and shown right away. */
     private void addWallpaper() {
         FileDialog chooser = new FileDialog(frame, "Choose a picture to use as a wallpaper", FileDialog.LOAD);
         chooser.setFilenameFilter((directory, name) -> name.toLowerCase().matches(".*\\.(png|jpe?g|gif|bmp)"));

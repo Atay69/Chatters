@@ -5,17 +5,29 @@ import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 /**
- * Wallpapers for the chat window. Every picture in the "wallpapers" folder is one wallpaper.
- * next() cycles through them (the last step is "Off"); add() copies a new picture into the folder.
+ * Wallpapers for the chat window. There are two kinds, and both are in one list:
+ *
+ *   1. The DEFAULT wallpapers are part of the program itself (src/wallpapers, listed in wallpapers/list.txt),
+ *      so they are inside Chatter.jar and every computer has them.
+ *   2. The user's OWN wallpapers are the pictures in the folder  <home>/.chatters/wallpapers  of this
+ *      computer. "Add wallpaper" copies a picture there.
+ *
+ * next() cycles through all of them (the last step is "Off"); add() adds a picture of the user.
  *
  * Softness: a wallpaper is shrunk to SOFT_WIDTH pixels and stretched back up smoothly when it is
  * painted, so it is never shown at full resolution. A bigger SOFT_WIDTH is sharper, a smaller one blurrier.
@@ -23,58 +35,119 @@ import java.util.Locale;
 public final class WallpaperManager {
     private static final int SOFT_WIDTH = 340;
 
-    private final Path folder;
-    private final List<Path> files = new ArrayList<Path>();
-    private int index;              // 0 .. files.size()-1 = a wallpaper, files.size() = "Off"
+    /** One wallpaper: the name shown in the menu and where its picture is. */
+    private static final class Wallpaper {
+        final String name;
+        final URL picture;
+
+        Wallpaper(String name, URL picture) {
+            this.name = name;
+            this.picture = picture;
+        }
+    }
+
+    private final Path userFolder;
+    private final List<Wallpaper> wallpapers = new ArrayList<Wallpaper>();
+    private int index;              // 0 .. size-1 = a wallpaper, size = "Off"
     private BufferedImage soft;     // the shrunk copy of the current wallpaper
     private int softIndex = -1;     // which wallpaper "soft" belongs to
 
-    public WallpaperManager(Path folder, int savedIndex) {
-        this.folder = folder;
+    /** The folder for the user's own wallpapers on this computer. */
+    public static Path defaultUserFolder() {
+        return Paths.get(System.getProperty("user.home"), ".chatters", "wallpapers");
+    }
+
+    public WallpaperManager(Path userFolder, int savedIndex) {
+        this.userFolder = userFolder;
         scan();
-        index = savedIndex >= 0 && savedIndex <= files.size() ? savedIndex : firstWallpaper();
+        index = savedIndex >= 0 && savedIndex <= wallpapers.size() ? savedIndex : firstWallpaper();
     }
 
     /** The wallpaper shown before the user has chosen one: "graphite" if it exists, else the first picture. */
     private int firstWallpaper() {
-        for (int i = 0; i < files.size(); i++) {
-            if (files.get(i).getFileName().toString().startsWith("graphite")) {
+        for (int i = 0; i < wallpapers.size(); i++) {
+            if (wallpapers.get(i).name.equals("graphite")) {
                 return i;
             }
         }
         return 0;
     }
 
-    /** Reads the folder: every png, jpg, gif or bmp is a wallpaper. */
+    /** Builds the list: the default wallpapers first, then the user's own ones. */
     private void scan() {
-        files.clear();
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(folder)) {
+        wallpapers.clear();
+        for (String fileName : defaultFileNames()) {
+            URL picture = WallpaperManager.class.getResource("/wallpapers/" + fileName);
+            if (picture != null) {
+                wallpapers.add(new Wallpaper(withoutExtension(fileName), picture));
+            }
+        }
+        List<Path> own = new ArrayList<Path>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(userFolder)) {
             for (Path file : stream) {
-                String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
-                if (name.matches(".*\\.(png|jpe?g|gif|bmp)")) {
-                    files.add(file);
+                if (isPicture(file.getFileName().toString())) {
+                    own.add(file);
                 }
             }
-        } catch (IOException missingFolder) {
-            // no wallpapers folder: the window simply has no wallpaper
+        } catch (IOException noFolderYet) {
+            // the user has not added a wallpaper yet
         }
-        files.sort(null);
+        own.sort(null);
+        for (Path file : own) {
+            try {
+                wallpapers.add(new Wallpaper(withoutExtension(file.getFileName().toString()), file.toUri().toURL()));
+            } catch (IOException impossible) {
+                System.err.println("Skipped wallpaper " + file + ": " + impossible.getMessage());
+            }
+        }
         softIndex = -1;
     }
 
-    /** Copies a picture into the wallpapers folder and makes it the current wallpaper. */
+    /** The file names in wallpapers/list.txt (one per line) = the wallpapers that come with the program. */
+    private static List<String> defaultFileNames() {
+        List<String> names = new ArrayList<String>();
+        try (InputStream list = WallpaperManager.class.getResourceAsStream("/wallpapers/list.txt")) {
+            if (list != null) {
+                BufferedReader reader = new BufferedReader(new InputStreamReader(list, StandardCharsets.UTF_8));
+                for (String line = reader.readLine(); line != null; line = reader.readLine()) {
+                    if (!line.trim().isEmpty() && isPicture(line.trim())) {
+                        names.add(line.trim());
+                    }
+                }
+            }
+        } catch (IOException unreadable) {
+            System.err.println("Could not read the default wallpapers: " + unreadable.getMessage());
+        }
+        return names;
+    }
+
+    private static boolean isPicture(String fileName) {
+        return fileName.toLowerCase(Locale.ROOT).matches(".*\\.(png|jpe?g|gif|bmp)");
+    }
+
+    private static String withoutExtension(String fileName) {
+        return fileName.substring(0, fileName.lastIndexOf('.'));
+    }
+
+    /** Copies a picture of the user into their wallpaper folder and makes it the current wallpaper. */
     public void add(Path picture) throws IOException {
         if (ImageIO.read(picture.toFile()) == null) {
             throw new IOException("That file is not a picture this app can read (use PNG, JPG, GIF or BMP).");
         }
-        Files.createDirectories(folder);
-        Path target = folder.resolve(picture.getFileName().toString());
+        Files.createDirectories(userFolder);
+        Path target = userFolder.resolve(picture.getFileName().toString());
         for (int copy = 2; Files.exists(target); copy++) {
-            target = folder.resolve(copy + "-" + picture.getFileName());
+            target = userFolder.resolve(copy + "-" + picture.getFileName());
         }
         Files.copy(picture, target);
         scan();
-        index = Math.max(0, files.indexOf(target));
+        String added = withoutExtension(target.getFileName().toString());
+        index = 0;
+        for (int i = 0; i < wallpapers.size(); i++) {
+            if (wallpapers.get(i).name.equals(added)) {
+                index = i;
+            }
+        }
     }
 
     public int index() {
@@ -83,20 +156,16 @@ public final class WallpaperManager {
 
     /** Switches to the next wallpaper; after the last one comes "Off", then the first again. */
     public void next() {
-        index = (index + 1) % (files.size() + 1);
+        index = (index + 1) % (wallpapers.size() + 1);
     }
 
     private boolean isOff() {
-        return index >= files.size();
+        return index >= wallpapers.size();
     }
 
     /** The current wallpaper's name (file name without the extension), or "Off". */
     public String name() {
-        if (isOff()) {
-            return "Off";
-        }
-        String name = files.get(index).getFileName().toString();
-        return name.substring(0, name.lastIndexOf('.'));
+        return isOff() ? "Off" : wallpapers.get(index).name;
     }
 
     /** Paints the current wallpaper over the whole width x height area, cropped to fill it. */
@@ -118,7 +187,7 @@ public final class WallpaperManager {
             softIndex = index;
             soft = null;
             try {
-                BufferedImage full = ImageIO.read(files.get(index).toFile());
+                BufferedImage full = ImageIO.read(wallpapers.get(index).picture);
                 int height = Math.max(1, full.getHeight() * SOFT_WIDTH / full.getWidth());
                 Image shrunk = full.getScaledInstance(SOFT_WIDTH, height, Image.SCALE_AREA_AVERAGING);
                 soft = new BufferedImage(SOFT_WIDTH, height, BufferedImage.TYPE_INT_RGB);

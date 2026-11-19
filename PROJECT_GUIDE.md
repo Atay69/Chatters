@@ -25,7 +25,7 @@ src/
   client/   the window the user sees
   ai/       the place where your own AI plugs in
   images/   icons and the logo          emoji/   the emoji pictures (3 sizes)
-wallpapers/   pictures the Wallpaper button cycles through
+  wallpapers/   the default wallpapers (they are inside Chatter.jar, so every computer has them) + list.txt = their names
 chatter-data/ everything the server saves (created automatically)
 ```
 
@@ -105,7 +105,7 @@ Everything that travels is a **packet**: `type, sender, timestamp, metadata, [by
 * **Rename the app:** change `NAME` in `shared/AppInfo.java`.
 * **More emoji:** put `<unicode-hex>.png` files into `src/emoji/128`, `44` and `22`
   and list them in `Emoji.java`.
-* **Wallpapers:** the "+ Wallpaper" button copies a picture into `wallpapers/`.
+* **Wallpapers:** the default ones live in `src/wallpapers/` and are listed in `src/wallpapers/list.txt` (add a file there and write its name in list.txt to give everybody a new default; rebuild the jar). "Add wallpaper" in the menu copies a picture into `<your home folder>/.chatters/wallpapers/` on that computer, so every user can have their own wallpapers.
 
 ## Credits
 
