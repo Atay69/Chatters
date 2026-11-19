@@ -71,8 +71,8 @@ public final class ChatClient implements AutoCloseable {
 
     private ChatClient(Socket socket, String mode, String account, String password) throws IOException {
         this.socket = socket;
-        this.input = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
-        this.output = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
+        this.input = new DataInputStream(new BufferedInputStream(socket.getInputStream(), 1024 * 1024));
+        this.output = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream(), 1024 * 1024));
         sendFrame(Frames.authRequest(mode, account, password));
 
         socket.setSoTimeout(10_000);
@@ -188,6 +188,25 @@ public final class ChatClient implements AutoCloseable {
         }
     }
 
+    /** Tells everybody my status (a ChatProtocol.STATUS_* value). */
+    public void sendStatus(int status) throws IOException {
+        synchronized (output) {
+            output.writeByte(ChatProtocol.TYPE_STATUS);
+            output.writeByte(status);
+            output.flush();
+        }
+    }
+
+    /** Sets my profile picture (PNG bytes); the server shows it to everybody. */
+    public void sendAvatar(byte[] png) throws IOException {
+        synchronized (output) {
+            output.writeByte(ChatProtocol.TYPE_AVATAR);
+            output.writeInt(png.length);
+            output.write(png);
+            output.flush();
+        }
+    }
+
     /** A voice message for one person (private chat). */
     public void sendPrivateAudio(String recipient, byte[] data) throws IOException {
         synchronized (output) {
@@ -209,7 +228,7 @@ public final class ChatClient implements AutoCloseable {
         }
         long length = Files.size(file.toPath());
         if (length > ChatProtocol.MAX_ATTACHMENT_BYTES) {
-            throw new IOException("Files must be 50 MB or smaller.");
+            throw new IOException("Files must be smaller than 2 GB.");
         }
         Thread uploader = new Thread(() -> {
             try (BufferedInputStream fileInput = new BufferedInputStream(new FileInputStream(file))) {
@@ -217,7 +236,7 @@ public final class ChatClient implements AutoCloseable {
                     output.writeByte(type);
                     output.writeUTF(file.getName());
                     output.writeInt((int) length);
-                    byte[] buffer = new byte[64 * 1024];
+                    byte[] buffer = new byte[1024 * 1024]; // big pieces = faster uploads
                     long transferred = 0;
                     long lastReported = 0;
                     long reportInterval = Math.max(buffer.length, length / 100);

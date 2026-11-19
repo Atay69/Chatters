@@ -77,7 +77,7 @@ final class MessageView {
         Widgets.TintedPanel box = new Widgets.TintedPanel(new BorderLayout(), Theme.Role.CONTROL, 24);
         box.setBorder(BorderFactory.createEmptyBorder(10, 22, 10, 22));
         Widgets.Label text = new Widgets.Label("<html><center><b>Welcome to GroupChat</b><br>" + escape(greeting) + "</center></html>", Theme.Role.TEXT);
-        text.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        text.setFont(Theme.font(Font.PLAIN, 12));
         box.add(text, BorderLayout.CENTER);
         list.add(centered(box));
     }
@@ -109,14 +109,14 @@ final class MessageView {
                 : day.equals(LocalDate.now().minusDays(1)) ? "Yesterday"
                 : day.format(DateTimeFormatter.ofPattern("MMMM d, yyyy", Locale.ENGLISH));
         Widgets.Label heading = new Widgets.Label(text, Theme.Role.MUTED);
-        heading.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        heading.setFont(Theme.font(Font.PLAIN, 11));
         list.add(centered(heading));
     }
 
     /** "Sora joined the chat": a quiet centred line instead of a bubble. */
     private JComponent systemLine(ChatEntry entry) {
         Widgets.Label line = new Widgets.Label(entry.text, Theme.Role.MUTED);
-        line.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        line.setFont(Theme.font(Font.PLAIN, 11));
         return centered(line);
     }
 
@@ -125,7 +125,7 @@ final class MessageView {
         Widgets.Bubble bubble = new Widgets.Bubble(mine ? Theme.Role.BUBBLE_OUT : Theme.Role.BUBBLE_IN, mine);
         if (!mine && showNames) {
             Widgets.Label name = new Widgets.Label(ProfileNameFormatter.format(entry.sender), Theme.Role.MUTED);
-            name.setFont(new Font("SansSerif", Font.BOLD, 11));
+            name.setFont(Theme.font(Font.BOLD, 11));
             name.setAlignmentX(Component.LEFT_ALIGNMENT);
             bubble.add(name);
         }
@@ -134,15 +134,16 @@ final class MessageView {
         bubble.add(content);
 
         Widgets.Label time = new Widgets.Label(entry.time(), Theme.Role.MUTED);
-        time.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        time.setFont(Theme.font(Font.PLAIN, 10));
         JPanel timeRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
         timeRow.setOpaque(false);
+        timeRow.setBorder(BorderFactory.createEmptyBorder(3, 0, 0, 0)); // a little air between the text and the time
         timeRow.setAlignmentX(Component.LEFT_ALIGNMENT);
         timeRow.add(time);
         bubble.add(timeRow);
 
         Row row = new Row(new BorderLayout());
-        row.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
+        row.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
         row.add(bubble, mine ? BorderLayout.EAST : BorderLayout.WEST);
         return row;
     }
@@ -175,10 +176,7 @@ final class MessageView {
     private JComponent fileCard(ChatEntry entry) {
         Widgets.TintedPanel card = new Widgets.TintedPanel(new BorderLayout(12, 0), Theme.Role.CONTROL, 18);
         card.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 8));
-        SharpIcon icon = SharpIcon.fromResource("/images/File.png", 30);
-        if (icon != null) {
-            card.add(new JLabel(icon), BorderLayout.WEST);
-        }
+        card.add(new JLabel(new LineIcon(LineIcon.Kind.FILE, 30)), BorderLayout.WEST);
         JPanel details = new JPanel(new GridLayout(0, 1, 0, 2));
         details.setOpaque(false);
         Widgets.Label name = new Widgets.Label(shorten(entry.text, 34), Theme.Role.TEXT);
@@ -223,7 +221,7 @@ final class MessageView {
         int width = Math.max(30, Math.min(maxBubbleWidth(), estimatedWidth));
         String html = Emoji.inline(escape(text), emojiSize).replace("\n", "<br>");
         JLabel label = new JLabel("<html><div style='width:" + width + "px'>" + html + "</div></html>");
-        label.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        label.setFont(Theme.font(Font.PLAIN, 13));
         label.setForeground(Theme.Role.TEXT.color());
         return label;
     }

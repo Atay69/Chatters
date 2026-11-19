@@ -45,7 +45,7 @@ final class Composer extends Widgets.TintedPanel {
     private static final long serialVersionUID = 1L;
     private static final int MAX_FILE_BYTES = ChatProtocol.MAX_ATTACHMENT_BYTES;
     private static final int MAX_TEXT_CHARS = 60000;
-    private static final int MAX_PRIVATE_VOICE_BYTES = 8 * 1024 * 1024; // the server's limit for private voice messages
+    private static final int MAX_PRIVATE_VOICE_BYTES = ChatProtocol.MAX_ATTACHMENT_BYTES;
 
     /** What the composer needs from the window around it. */
     interface Host {
@@ -67,11 +67,11 @@ final class Composer extends Widgets.TintedPanel {
 
     private final InputArea input = new InputArea();
     private final Widgets.TintedPanel bar = new Widgets.TintedPanel(new BorderLayout(8, 0), Theme.Role.INPUT, 50);
-    private final Widgets.Button attachButton = iconButton("/images/File.png", "Send a file");
-    private final Widgets.Button imageButton = iconButton("/images/image.png", "Send an image");
-    private final Widgets.Button emojiButton = iconButton("/images/emoji.png", "Insert an emoji");
-    private final Widgets.Button recordButton = iconButton("/images/Audio.png", "Record a voice message");
-    private final Widgets.Button aiButton = iconButton("/images/sparkle.png",
+    private final Widgets.Button attachButton = iconButton(LineIcon.Kind.FILE, "Send a file");
+    private final Widgets.Button imageButton = iconButton(LineIcon.Kind.IMAGE, "Send an image");
+    private final Widgets.Button emojiButton = iconButton(LineIcon.Kind.EMOJI, "Insert an emoji");
+    private final Widgets.Button recordButton = iconButton(LineIcon.Kind.MICROPHONE, "Record a voice message");
+    private final Widgets.Button aiButton = iconButton(LineIcon.Kind.SPARKLE,
             "Send the text in the box to the AI assistant (or write /ai and your question)");
     private final Widgets.Button sendButton = new Widgets.Button("Send", null, null);
     private final JPanel suggestions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
@@ -92,13 +92,13 @@ final class Composer extends Widgets.TintedPanel {
         suggestions.setVisible(false);
         uploadBar.setUI(new UploadBarUI());
         uploadBar.setStringPainted(true);
-        uploadBar.setFont(new Font("SansSerif", Font.BOLD, 11));
+        uploadBar.setFont(Theme.font(Font.BOLD, 11));
         uploadBar.setPreferredSize(new Dimension(100, 20));
         uploadRow.setOpaque(false);
         uploadRow.setBorder(BorderFactory.createEmptyBorder(0, 5, 6, 5));
         uploadRow.add(uploadBar, BorderLayout.CENTER);
         uploadRow.setVisible(false);
-        status.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        status.setFont(Theme.font(Font.PLAIN, 11));
         status.setBorder(BorderFactory.createEmptyBorder(0, 5, 6, 0));
         JPanel above = new JPanel(new BorderLayout());
         above.setOpaque(false);
@@ -115,12 +115,12 @@ final class Composer extends Widgets.TintedPanel {
             tools.add(tool);
             tools.add(Box.createHorizontalStrut(4));
         }
-        sendButton.setFont(new Font("SansSerif", Font.BOLD, 14));
+        sendButton.setFont(Theme.font(Font.BOLD, 14));
         sendButton.setForeground(Color.WHITE);
-        sendButton.setBackgroundOverride(Theme.ACCENT);
+        updateAccent();
         sendButton.setCorner(50);
         sendButton.setPreferredSize(new Dimension(104, 50));
-        bar.setBorder(BorderFactory.createEmptyBorder(4, 20, 4, 10));
+        bar.setBorder(BorderFactory.createEmptyBorder(4, 18, 4, 10));
         bar.add(Widgets.scrollPane(input), BorderLayout.CENTER);
         bar.add(tools, BorderLayout.EAST);
         JPanel barRow = new JPanel(new BorderLayout(10, 0)); // [ message box with tools ] [ Send ]
@@ -257,7 +257,7 @@ final class Composer extends Widgets.TintedPanel {
                     host.connectionLost(error);
                 }
             });
-        } catch (IOException rejected) { // unreadable, or over 50 MB: nothing was sent
+        } catch (IOException rejected) { // unreadable, or too big: nothing was sent
             uploading = false;
             uploadRow.setVisible(false);
             setBusy(false);
@@ -305,7 +305,7 @@ final class Composer extends Widgets.TintedPanel {
             }
             byte[] wav = recorder.stop();
             recordButton.setText("");
-            recordButton.setIcon(SharpIcon.fromResource("/images/Audio.png", 24));
+            recordButton.setIcon(new LineIcon(LineIcon.Kind.MICROPHONE, 24));
             recordButton.setTextRole(Theme.Role.TEXT);
             recordButton.setBackgroundOverride(null);
             String peer = host.activePeer(); // null = GroupChat
@@ -353,6 +353,11 @@ final class Composer extends Widgets.TintedPanel {
         }
     }
 
+    /** Gives the Send button the user's chosen accent colour (the outline and progress bar read it themselves). */
+    void updateAccent() {
+        sendButton.setBackgroundOverride(Theme.accent());
+    }
+
     /** Asks for reply suggestions (the window calls this after a new message from someone else). */
     void requestSuggestions() {
         sendAiQuery(ChatProtocol.AI_SUGGEST, "");
@@ -363,8 +368,8 @@ final class Composer extends Widgets.TintedPanel {
     private void setupInput() {
         input.setLineWrap(true);
         input.setWrapStyleWord(true);
-        input.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        input.setBorder(BorderFactory.createEmptyBorder(8, 6, 8, 6));
+        input.setFont(Theme.font(Font.PLAIN, 13));
+        input.setBorder(BorderFactory.createEmptyBorder(9, 4, 9, 6));
         input.getAccessibleContext().setAccessibleName("Message");
         input.addFocusListener(new FocusAdapter() { // the bar's outline turns accent-coloured while typing
             @Override
@@ -452,9 +457,9 @@ final class Composer extends Widgets.TintedPanel {
         }
     }
 
-    private static Widgets.Button iconButton(String picture, String tooltip) {
+    private static Widgets.Button iconButton(LineIcon.Kind icon, String tooltip) {
         Widgets.Button button = new Widgets.Button("", null, Theme.Role.TEXT);
-        button.setIcon(SharpIcon.fromResource(picture, 24));
+        button.setIcon(new LineIcon(icon, 24));
         button.setToolTipText(tooltip);
         button.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
         button.setPreferredSize(new Dimension(38, 38));
@@ -474,7 +479,7 @@ final class Composer extends Widgets.TintedPanel {
                 g.fillRoundRect(0, 0, width, height, height, height);
                 int filled = (int) Math.round(width * progressBar.getPercentComplete());
                 if (filled > 0) {
-                    g.setColor(Theme.ACCENT);
+                    g.setColor(Theme.accent());
                     g.fillRoundRect(0, 0, Math.max(filled, height), height, height, height);
                 }
                 g.setFont(progressBar.getFont());

@@ -9,11 +9,17 @@ import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.geom.Area;
 import java.awt.geom.Ellipse2D;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import javax.imageio.ImageIO;
 
 /**
  * Round profile picture. For a person it is the anonymous head-and-shoulders silhouette (like the
  * default avatar on Instagram or Facebook); for GroupChat it is a chat bubble. It can show a small
- * green/grey dot for online/offline.
+ * status symbol (see StatusIcon).
  */
 public final class ProfileAvatar extends JLabel {
     private static final long serialVersionUID = 1L;
@@ -21,19 +27,24 @@ public final class ProfileAvatar extends JLabel {
     private static final Color SILHOUETTE = new Color(245, 245, 247);
 
     private final boolean group;
-    private Boolean online; // null = no dot
+    private Integer status; // a ChatProtocol.STATUS_*; null = no symbol
+    private final String account; // lower-case account name: the key of the picture ("" for GroupChat)
+
+    /** Everybody's profile pictures by lower-case account name; people without one show the silhouette. */
+    private static final Map<String, BufferedImage> PICTURES = new HashMap<String, BufferedImage>();
 
     /** The picture of a person. */
     public ProfileAvatar(String name, int size) {
-        this(ProfileNameFormatter.format(name), size, false);
+        this(name, ProfileNameFormatter.format(name), size, false);
     }
 
     /** The picture of GroupChat. */
     static ProfileAvatar group(int size) {
-        return new ProfileAvatar("GroupChat", size, true);
+        return new ProfileAvatar("", "GroupChat", size, true);
     }
 
-    private ProfileAvatar(String name, int size, boolean group) {
+    private ProfileAvatar(String account, String name, int size, boolean group) {
+        this.account = account.toLowerCase();
         this.group = group;
         setPreferredSize(new Dimension(size, size));
         setMinimumSize(new Dimension(size, size));
@@ -42,9 +53,21 @@ public final class ProfileAvatar extends JLabel {
         setToolTipText(group ? "GroupChat" : "Profile picture for " + name);
     }
 
-    /** Shows a green (online) or grey (offline) dot at the bottom right; null removes it. */
-    ProfileAvatar showOnline(Boolean online) {
-        this.online = online;
+    /** Remembers the picture (PNG bytes) of a user; every avatar of that user shows it from now on. */
+    static void setPicture(String account, byte[] png) {
+        try {
+            BufferedImage picture = ImageIO.read(new ByteArrayInputStream(png));
+            if (picture != null) {
+                PICTURES.put(account.toLowerCase(), picture);
+            }
+        } catch (IOException unreadable) {
+            // not a picture: keep the silhouette
+        }
+    }
+
+    /** Shows the status symbol (green, half moon, grey, red) at the bottom right; null removes it. */
+    ProfileAvatar showStatus(Integer status) {
+        this.status = status;
         return this;
     }
 
@@ -59,8 +82,14 @@ public final class ProfileAvatar extends JLabel {
             Shape circle = new Ellipse2D.Float(inset, inset, d, d);
             g.setColor(BACKGROUND);
             g.fill(circle);
+            BufferedImage picture = PICTURES.get(account);
             g.setColor(SILHOUETTE);
-            if (group) {
+            if (picture != null) {
+                g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                g.setClip(circle);
+                g.drawImage(picture, Math.round(inset), Math.round(inset), Math.round(d), Math.round(d), null);
+                g.setClip(null);
+            } else if (group) {
                 paintBubble(g, inset, d);
             } else {
                 Area person = new Area(new Ellipse2D.Float(inset + d * 0.32f, inset + d * 0.16f, d * 0.36f, d * 0.36f)); // head
@@ -68,12 +97,11 @@ public final class ProfileAvatar extends JLabel {
                 person.intersect(new Area(circle));
                 g.fill(person);
             }
-            if (online != null) {
-                float dot = d * 0.28f;
+            if (status != null) {
+                float dot = d * 0.32f;
                 g.setColor(new Color(40, 40, 44));
-                g.fill(new Ellipse2D.Float(inset + d - dot - 1, inset + d - dot - 1, dot + 2, dot + 2)); // dark ring
-                g.setColor(online ? Theme.Role.ONLINE.color() : new Color(120, 120, 126));
-                g.fill(new Ellipse2D.Float(inset + d - dot, inset + d - dot, dot, dot));
+                g.fill(new Ellipse2D.Float(inset + d - dot - 1.5f, inset + d - dot - 1.5f, dot + 3, dot + 3)); // dark ring
+                StatusIcon.paint(g, status, inset + d - dot, inset + d - dot, dot);
             }
         } finally {
             g.dispose();

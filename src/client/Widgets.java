@@ -95,7 +95,7 @@ final class Widgets {
                 g.setColor(fill.color());
                 if (corner > 0) {
                     g.fillRoundRect(0, 0, w - 1, h - 1, corner, corner);
-                    g.setColor(highlighted ? Theme.ACCENT : Theme.Role.BORDER.color());
+                    g.setColor(highlighted ? Theme.accent() : Theme.Role.BORDER.color());
                     g.drawRoundRect(0, 0, w - 1, h - 1, corner, corner);
                 } else {
                     g.fillRect(0, 0, w, h);
@@ -172,13 +172,20 @@ final class Widgets {
                 int h = getHeight();
                 int left = tailRight ? 0 : TAIL;
                 int width = w - TAIL;
+                java.awt.Polygon tail = tailRight
+                        ? new java.awt.Polygon(new int[] { width - 14, w - 1, width - 3 }, new int[] { h - 16, h - 1, h - 1 }, 3)
+                        : new java.awt.Polygon(new int[] { TAIL + 14, 0, TAIL + 3 }, new int[] { h - 16, h - 1, h - 1 }, 3);
                 g.setColor(fill.color());
                 g.fillRoundRect(left, 0, width, h, 24, 24);
-                if (tailRight) {
-                    g.fillPolygon(new int[] { width - 14, w - 1, width - 3 }, new int[] { h - 16, h - 1, h - 1 }, 3);
-                } else {
-                    g.fillPolygon(new int[] { TAIL + 14, 0, TAIL + 3 }, new int[] { h - 16, h - 1, h - 1 }, 3);
-                }
+                g.fillPolygon(tail);
+
+                // a dim outline around the whole bubble (tail included) in the user's accent colour
+                java.awt.geom.Area shape = new java.awt.geom.Area(new RoundRectangle2D.Float(left + 0.5f, 0.5f, width - 1, h - 1, 24, 24));
+                shape.add(new java.awt.geom.Area(tail));
+                Color accent = Theme.accent();
+                g.setColor(new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), 110));
+                g.setStroke(new BasicStroke(1.3f));
+                g.draw(shape);
             } finally {
                 g.dispose();
             }
@@ -204,7 +211,7 @@ final class Widgets {
             setBorderPainted(false);
             setFocusPainted(false);
             setOpaque(false);
-            setFont(new Font("SansSerif", Font.BOLD, 11));
+            setFont(Theme.font(Font.BOLD, 11));
             setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         }
@@ -250,6 +257,31 @@ final class Widgets {
             }
             super.paintComponent(graphics); // the icon and the text
         }
+    }
+
+    // ---------------------------------------------------------------- popup menus
+
+    /** A popup menu in the colours of the current theme. */
+    static javax.swing.JPopupMenu menu() {
+        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+        menu.setBackground(Theme.Role.INPUT.color());
+        menu.setBorder(BorderFactory.createLineBorder(Theme.Role.BORDER.color()));
+        return menu;
+    }
+
+    /** One line of such a menu (the icon may be null); it lights up under the mouse. */
+    static javax.swing.JMenuItem menuItem(String text, javax.swing.Icon icon) {
+        Color normal = Theme.Role.INPUT.color();
+        Color lit = Theme.dark ? new Color(76, 76, 82) : new Color(232, 232, 236);
+        javax.swing.JMenuItem item = new javax.swing.JMenuItem(text, icon);
+        item.setOpaque(true);
+        item.setBackground(normal);
+        item.setForeground(Theme.Role.TEXT.color());
+        item.setFont(Theme.font(Font.PLAIN, 13));
+        item.setIconTextGap(12);
+        item.setBorder(BorderFactory.createEmptyBorder(8, 14, 8, 22));
+        item.addChangeListener(event -> item.setBackground(item.isArmed() ? lit : normal));
+        return item;
     }
 
     /** A message list that always has the width of the chat area (no sideways scrolling). */

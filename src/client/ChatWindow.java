@@ -53,12 +53,12 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
     private final ChatClient client;
     private final boolean aiAvailable;
     private final String greeting = GREETINGS[new Random().nextInt(GREETINGS.length)];
-    private final WallpaperManager wallpapers = new WallpaperManager(Paths.get("wallpapers"), Settings.getInt("wallpaper", -1));
+    private final WallpaperManager wallpapers;
 
     // the conversations
     private final List<ChatEntry> groupEntries = new ArrayList<ChatEntry>();
     private final Map<String, List<ChatEntry>> privateEntries = new HashMap<String, List<ChatEntry>>(); // key: lower-case name
-    private final Map<String, Boolean> people = new TreeMap<String, Boolean>(String.CASE_INSENSITIVE_ORDER); // name -> online
+    private final Map<String, Integer> people = new TreeMap<String, Integer>(String.CASE_INSENSITIVE_ORDER); // name -> ChatProtocol.STATUS_*
     private final Map<String, Integer> unread = new HashMap<String, Integer>(); // new private messages per person (lower-case name)
     private String activePeer;      // the open private chat, or null when GroupChat is open
     private boolean live;           // false while the saved history is still being replayed
@@ -71,8 +71,6 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
     private final JPanel headerPicture = new JPanel(new BorderLayout());
     private Widgets.Label title;
     private Widgets.Label subtitle;
-    private Widgets.Button wallpaperButton;
-    private Widgets.Button themeButton;
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> start(args));
@@ -127,7 +125,10 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         this.client = client;
         this.username = client.username();
         this.aiAvailable = client.aiAvailable();
+        // the theme, the accent colour and the wallpaper are saved per user: each account keeps its own choices
         Theme.dark = Settings.getBoolean("darkMode." + username, Settings.getBoolean("darkMode", true));
+        Theme.accentIndex = Settings.getInt("accent." + username, 0) % Theme.ACCENT_NAMES.length;
+        this.wallpapers = new WallpaperManager(Paths.get("wallpapers"), Settings.getInt("wallpaper." + username, Settings.getInt("wallpaper", -1)));
         this.messages = new MessageView(frame, username);
         this.composer = new Composer(this);
         buildWindow();
@@ -137,7 +138,7 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
     // ---------------------------------------------------------------- building the window
 
     private void buildWindow() {
-        sidebar = new Sidebar(username, this::openConversation, this);
+        sidebar = new Sidebar(username, client, this::openConversation, this);
 
         Widgets.Glass card = new Widgets.Glass(new BorderLayout(), 56);
         card.add(sidebar, BorderLayout.WEST);
@@ -148,7 +149,13 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         root.setBorder(BorderFactory.createEmptyBorder(28, 28, 28, 28)); // the wallpaper around the card
         root.add(card, BorderLayout.CENTER);
 
-        frame.setContentPane(root);
+        // our own title bar on top instead of the Windows one
+        JPanel window = new JPanel(new BorderLayout());
+        window.add(new TitleBar(frame, AppInfo.NAME), BorderLayout.NORTH);
+        window.add(root, BorderLayout.CENTER);
+
+        frame.setUndecorated(true);
+        frame.setContentPane(window);
         frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         frame.setMinimumSize(new Dimension(860, 580));
         frame.setSize(1000, 720); // the card is a little bigger than a phone-style chat
@@ -166,9 +173,9 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
     /** The right part of the card: header, messages, composer. */
     private JPanel chatPanel() {
         title = new Widgets.Label("GroupChat", Theme.Role.TEXT);
-        title.setFont(new Font("SansSerif", Font.BOLD, 15));
+        title.setFont(Theme.font(Font.BOLD, 15));
         subtitle = new Widgets.Label(" ", Theme.Role.MUTED);
-        subtitle.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        subtitle.setFont(Theme.font(Font.PLAIN, 11));
         JPanel titles = new JPanel(new BorderLayout(0, 2));
         titles.setOpaque(false);
         titles.add(title, BorderLayout.NORTH);
@@ -179,22 +186,28 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         who.add(headerPicture, BorderLayout.WEST);
         who.add(titles, BorderLayout.CENTER);
 
-        Widgets.Button addWallpaper = pill("+ Wallpaper");
-        addWallpaper.setToolTipText("Choose a picture to add to the wallpapers folder");
-        addWallpaper.addActionListener(event -> addWallpaper());
-        wallpaperButton = pill("");
-        wallpaperButton.setToolTipText("Cycle through the pictures in the wallpapers folder");
-        wallpaperButton.addActionListener(event -> cycleWallpaper());
-        updateWallpaperButton();
-        themeButton = pill("");
-        themeButton.setToolTipText("Switch between the dark and the light theme");
-        themeButton.addActionListener(event -> toggleTheme());
-        updateThemeButton();
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        // one burger button holds all the appearance options
+        Widgets.Button menuButton = new Widgets.Button("", Theme.Role.CONTROL, Theme.Role.TEXT) {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            protected void paintComponent(java.awt.Graphics graphics) {
+                super.paintComponent(graphics);
+                java.awt.Graphics2D g = (java.awt.Graphics2D) graphics.create(); // thin outline around the button
+                g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setColor(Theme.Role.BORDER.color());
+                g.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 14, 14);
+                g.dispose();
+            }
+        };
+        menuButton.setIcon(new LineIcon(LineIcon.Kind.MENU, 24));
+        menuButton.setCorner(14);
+        menuButton.setPreferredSize(new Dimension(40, 40));
+        menuButton.setToolTipText("Wallpaper, colour and theme");
+        menuButton.addActionListener(event -> showMenu(menuButton));
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
         buttons.setOpaque(false);
-        buttons.add(addWallpaper);
-        buttons.add(wallpaperButton);
-        buttons.add(themeButton);
+        buttons.add(menuButton);
 
         Widgets.TintedPanel header = new Widgets.TintedPanel(new BorderLayout(), Theme.Role.COMPOSER).edges("B");
         header.setBorder(BorderFactory.createEmptyBorder(14, 26, 14, 26));
@@ -207,13 +220,6 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         chat.add(messages.component(), BorderLayout.CENTER);
         chat.add(composer, BorderLayout.SOUTH);
         return chat;
-    }
-
-    private static Widgets.Button pill(String text) {
-        Widgets.Button button = new Widgets.Button(text, Theme.Role.CONTROL, Theme.Role.TEXT);
-        button.setCorner(30);
-        button.setBorder(BorderFactory.createEmptyBorder(7, 14, 7, 14));
-        return button;
     }
 
     // ---------------------------------------------------------------- conversations
@@ -241,13 +247,13 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         boolean group = activePeer == null;
         title.setText(group ? "GroupChat" : ProfileNameFormatter.format(activePeer));
         if (group) {
-            long online = people.values().stream().filter(isOnline -> isOnline).count();
+            long online = people.values().stream().filter(status -> status != ChatProtocol.STATUS_OFFLINE).count();
             subtitle.setText(online + " online · " + people.size() + " members");
         } else {
-            subtitle.setText(Boolean.TRUE.equals(people.get(activePeer)) ? "Online" : "Offline");
+            subtitle.setText(StatusIcon.name(people.getOrDefault(activePeer, ChatProtocol.STATUS_OFFLINE)));
         }
         headerPicture.removeAll();
-        headerPicture.add(group ? ProfileAvatar.group(44) : new ProfileAvatar(activePeer, 44).showOnline(people.get(activePeer)));
+        headerPicture.add(group ? ProfileAvatar.group(44) : new ProfileAvatar(activePeer, 44).showStatus(people.get(activePeer)));
         headerPicture.revalidate();
         headerPicture.repaint();
     }
@@ -319,15 +325,18 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
             try {
                 people.clear();
                 for (ChatProtocol.UserRecord user : ChatProtocol.decodeUserList(packet.data)) {
-                    people.put(user.displayName, user.online);
+                    people.put(user.displayName, user.status);
                 }
                 refreshPeople();
             } catch (IOException error) {
                 composer.showStatus("Could not read the user list: " + error.getMessage(), true);
             }
         } else if (type == ChatProtocol.TYPE_USER_PRESENCE) {
-            people.put(packet.metadata, packet.data.length > 0 && packet.data[0] != 0);
+            people.put(packet.metadata, packet.data.length > 0 && packet.data[0] != 0 ? ChatProtocol.STATUS_ONLINE : ChatProtocol.STATUS_OFFLINE);
             refreshPeople();
+        } else if (type == ChatProtocol.TYPE_AVATAR) {
+            ProfileAvatar.setPicture(packet.sender, packet.data); // somebody (maybe me) chose a new picture
+            frame.repaint();
         } else if (type == ChatProtocol.TYPE_AI_REPLY) {
             showAiReply(packet.metadata);
         } else if (type == ChatProtocol.TYPE_TRANSFER_STATUS) {
@@ -395,17 +404,31 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
 
     // ---------------------------------------------------------------- theme and wallpaper
 
+    /** The burger menu: every appearance option in one place. */
+    private void showMenu(Widgets.Button anchor) {
+        javax.swing.JPopupMenu menu = Widgets.menu();
+        String color = Theme.ACCENT_NAMES[Theme.accentIndex];
+        menu.add(Widgets.menuItem("Add wallpaper...", null)).addActionListener(event -> addWallpaper());
+        menu.add(Widgets.menuItem("Next wallpaper  (" + wallpapers.name() + ")", null)).addActionListener(event -> cycleWallpaper());
+        menu.add(Widgets.menuItem("Color: " + color, null)).addActionListener(event -> nextAccent());
+        menu.add(Widgets.menuItem(Theme.dark ? "Light mode" : "Dark mode", null)).addActionListener(event -> toggleTheme());
+        menu.show(anchor, anchor.getWidth() - menu.getPreferredSize().width, anchor.getHeight() + 6);
+    }
+
     private void toggleTheme() {
         Theme.dark = !Theme.dark;
         Settings.putBoolean("darkMode." + username, Theme.dark);
-        updateThemeButton();
         refreshPeople();
         refreshMessages(); // the messages are re-created with the new theme's colours
         frame.repaint();
     }
 
-    private void updateThemeButton() {
-        themeButton.setText(Theme.dark ? "☀ Light mode" : "☾ Dark mode");
+    /** "Color": the next accent colour for the Send button and outlines (saved for this user). */
+    private void nextAccent() {
+        Theme.accentIndex = (Theme.accentIndex + 1) % Theme.ACCENT_NAMES.length;
+        Settings.putInt("accent." + username, Theme.accentIndex);
+        composer.updateAccent();
+        frame.repaint();
     }
 
     private void cycleWallpaper() {
@@ -431,13 +454,7 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
     }
 
     private void wallpaperChanged() {
-        Settings.putInt("wallpaper", wallpapers.index());
-        updateWallpaperButton();
+        Settings.putInt("wallpaper." + username, wallpapers.index());
         frame.repaint();
-    }
-
-    private void updateWallpaperButton() {
-        String name = wallpapers.name();
-        wallpaperButton.setText("Wallpaper: " + (name.length() > 14 ? name.substring(0, 13) + "…" : name));
     }
 }

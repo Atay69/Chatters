@@ -41,3 +41,7 @@ ChatDownloads/
 ### Build output / logs ###
 *.class
 *.log
+
+
+### Old local profile pictures (pictures are now stored on the server) ###
+profile-pictures/

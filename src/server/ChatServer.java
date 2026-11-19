@@ -41,7 +41,7 @@ import java.util.TreeSet;
  */
 public class ChatServer {
     private static final int PORT = Integer.getInteger("chat.port", 5000);
-    private static final long MAX_HISTORY_BYTES = 256L * 1024 * 1024;
+    private static final long MAX_HISTORY_BYTES = Long.MAX_VALUE; // no limit on the saved GroupChat history
     private static final Path DATA_DIRECTORY = Paths.get(System.getProperty("chat.dataDir", "chatter-data"));
     private static final Path GROUP_HISTORY_FILE = DATA_DIRECTORY.resolve("group-history.bin");
     private static final Path USERS_FILE = DATA_DIRECTORY.resolve("users.bin");
@@ -109,7 +109,7 @@ public class ChatServer {
             return;
         }
         if (Files.size(GROUP_HISTORY_FILE) > MAX_HISTORY_BYTES) {
-            throw new IOException("Group history exceeds the configured 256 MiB limit.");
+            throw new IOException("Group history is too large.");
         }
         try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(GROUP_HISTORY_FILE.toFile())))) {
             while (in.available() > 0) {
@@ -150,7 +150,7 @@ public class ChatServer {
         synchronized (groupHistory) {
             long recordSize = 1L + 2 + sender.length() * 3L + 2 + timestamp.length() * 3L + 2 + meta.length() * 3L + 4 + data.length;
             if (Files.exists(GROUP_HISTORY_FILE) && Files.size(GROUP_HISTORY_FILE) + recordSize > MAX_HISTORY_BYTES) {
-                throw new IOException("Persistent group history is full (256 MiB limit).");
+                throw new IOException("Persistent group history is full.");
             }
             Files.createDirectories(DATA_DIRECTORY);
             try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(GROUP_HISTORY_FILE.toFile(), true)))) {
@@ -161,7 +161,7 @@ public class ChatServer {
                 out.writeInt(data.length);
                 out.write(data);
             }
-            groupHistory.add(new StoredMessage(type, sender, timestamp, meta, data.clone()));
+            groupHistory.add(new StoredMessage(type, sender, timestamp, meta, data));
         }
     }
 
@@ -199,6 +199,38 @@ public class ChatServer {
             this.timestamp = timestamp;
             this.meta = meta;
             this.data = data;
+        }
+    }
+
+    // ---------------------------------------------------------------- profile pictures
+
+    /** Every user's picture is one small PNG: chatter-data/avatars/<name>.png */
+    private static final Path AVATAR_DIRECTORY = DATA_DIRECTORY.resolve("avatars");
+
+    private static Path avatarFile(String user) throws IOException {
+        // URL-encoding makes the name safe as a file name and keeps different names different
+        return AVATAR_DIRECTORY.resolve(java.net.URLEncoder.encode(user.toLowerCase(), "UTF-8") + ".png");
+    }
+
+    /** Saves someone's new picture. */
+    static void saveAvatar(String user, byte[] png) throws IOException {
+        Files.createDirectories(AVATAR_DIRECTORY);
+        Files.write(avatarFile(user), png);
+    }
+
+    /** Sends the picture of everybody who has one to a client that just signed in. */
+    static void sendAvatars(ClientHandler target) {
+        synchronized (knownUsers) {
+            for (String user : knownUsers) {
+                try {
+                    Path file = avatarFile(user);
+                    if (Files.exists(file)) {
+                        target.sendPacket(ChatProtocol.TYPE_AVATAR, user, getTimestamp(), "", Files.readAllBytes(file));
+                    }
+                } catch (IOException unreadable) {
+                    System.err.println("Could not read the picture of " + user + ": " + unreadable.getMessage());
+                }
+            }
         }
     }
 
@@ -273,7 +305,10 @@ public class ChatServer {
             List<ChatProtocol.UserRecord> users = new ArrayList<ChatProtocol.UserRecord>();
             synchronized (knownUsers) {
                 for (String knownUser : knownUsers) {
-                    users.add(new ChatProtocol.UserRecord(knownUser, findOnlineUser(knownUser) != null));
+                    ClientHandler client = findOnlineUser(knownUser);
+                    // somebody who chose "invisible" looks offline to everybody else
+                    int status = client == null || client.status == ChatProtocol.STATUS_INVISIBLE ? ChatProtocol.STATUS_OFFLINE : client.status;
+                    users.add(new ChatProtocol.UserRecord(knownUser, status));
                 }
             }
             ChatProtocol.Packet list = Frames.userList(users);

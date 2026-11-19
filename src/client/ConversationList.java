@@ -51,14 +51,14 @@ final class ConversationList extends JPanel {
         setOpaque(false);
     }
 
-    /** Rebuilds the list. {@code users} maps each name to online/offline; {@code selected} is the open private chat (null = GroupChat). */
-    void update(Map<String, Boolean> users, String selected) {
+    /** Rebuilds the list. {@code users} maps each name to its status; {@code selected} is the open private chat (null = GroupChat). */
+    void update(Map<String, Integer> users, String selected) {
         removeAll();
         add(row(null, null, selected == null));
         for (boolean online : new boolean[] { true, false }) {
-            for (Map.Entry<String, Boolean> user : users.entrySet()) {
-                if (user.getValue() == online && !user.getKey().equalsIgnoreCase(self)) {
-                    add(row(user.getKey(), online, user.getKey().equalsIgnoreCase(selected)));
+            for (Map.Entry<String, Integer> user : users.entrySet()) {
+                if ((user.getValue() != ChatProtocol.STATUS_OFFLINE) == online && !user.getKey().equalsIgnoreCase(self)) {
+                    add(row(user.getKey(), user.getValue(), user.getKey().equalsIgnoreCase(selected)));
                 }
             }
         }
@@ -66,7 +66,7 @@ final class ConversationList extends JPanel {
         repaint();
     }
 
-    private JComponent row(String peer, Boolean online, boolean selected) {
+    private JComponent row(String peer, Integer status, boolean selected) {
         boolean[] hover = { false };
         JPanel row = new JPanel(new BorderLayout(12, 0)) {
             private static final long serialVersionUID = 1L;
@@ -90,20 +90,20 @@ final class ConversationList extends JPanel {
 
         JPanel picture = new JPanel(new GridBagLayout()); // centres the avatar vertically
         picture.setOpaque(false);
-        picture.add(peer == null ? ProfileAvatar.group(44) : new ProfileAvatar(peer, 44).showOnline(online));
+        picture.add(peer == null ? ProfileAvatar.group(44) : new ProfileAvatar(peer, 44).showStatus(status));
 
         ChatEntry last = previews.last(peer);
         Widgets.Label name = new Widgets.Label(peer == null ? "GroupChat" : ProfileNameFormatter.format(peer), Theme.Role.TEXT);
-        name.setFont(new Font("SansSerif", Font.BOLD, 13));
+        name.setFont(Theme.font(Font.BOLD, 13));
         Widgets.Label preview = new Widgets.Label(describe(last, peer == null), Theme.Role.MUTED);
-        preview.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        preview.setFont(Theme.font(Font.PLAIN, 11));
         JPanel texts = new JPanel(new GridLayout(2, 1));
         texts.setOpaque(false);
         texts.add(name);
         texts.add(preview);
 
         Widgets.Label time = new Widgets.Label(last == null ? " " : last.time(), Theme.Role.MUTED);
-        time.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        time.setFont(Theme.font(Font.PLAIN, 10));
         JPanel timeHolder = new JPanel(new BorderLayout());
         timeHolder.setOpaque(false);
         timeHolder.add(time, BorderLayout.NORTH);
@@ -145,7 +145,7 @@ final class ConversationList extends JPanel {
 
         Badge(int count) {
             super("+" + Math.min(count, 9), CENTER);
-            setFont(new Font("SansSerif", Font.BOLD, 10));
+            setFont(Theme.font(Font.BOLD, 10));
             setForeground(Color.WHITE);
             setBorder(BorderFactory.createEmptyBorder(2, 8, 2, 8));
         }
@@ -154,7 +154,7 @@ final class ConversationList extends JPanel {
         protected void paintComponent(Graphics graphics) {
             Graphics2D g = (Graphics2D) graphics.create();
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setColor(Theme.ACCENT);
+            g.setColor(Theme.accent());
             g.fillRoundRect(0, 0, getWidth(), getHeight(), getHeight(), getHeight());
             g.dispose();
             super.paintComponent(graphics);

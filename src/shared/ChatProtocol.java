@@ -21,7 +21,8 @@ import java.util.List;
  * {@link #carriesBytes} says which types have the byte block.
  */
 public final class ChatProtocol {
-    public static final int MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+    /** The biggest file one packet can carry: about 2 GB, the most a Java array (and the int length in the packet) can hold. */
+    public static final int MAX_ATTACHMENT_BYTES = Integer.MAX_VALUE - 8;
     public static final byte TYPE_TEXT = 1;
     public static final byte TYPE_IMAGE = 2;
     public static final byte TYPE_FILE = 3;
@@ -36,6 +37,16 @@ public final class ChatProtocol {
     public static final byte TYPE_USER_LIST = 13;       // everybody with online/offline
     public static final byte TYPE_AI_QUERY = 14;        // client -> server: question for the AI
     public static final byte TYPE_AI_REPLY = 15;        // server -> client: answer from the AI
+    public static final byte TYPE_AVATAR = 16;          // a profile picture (PNG bytes; the sender is its owner)
+    public static final int MAX_AVATAR_BYTES = 256 * 1024;
+    public static final byte TYPE_STATUS = 17;          // client -> server: my new status (one byte, see STATUS_*)
+
+    /** What a person shows to the others. INVISIBLE is chosen by a client but others are told OFFLINE. */
+    public static final int STATUS_OFFLINE = 0;
+    public static final int STATUS_ONLINE = 1;
+    public static final int STATUS_AWAY = 2;
+    public static final int STATUS_BUSY = 3;        // "Do not disturb"
+    public static final int STATUS_INVISIBLE = 4;
 
     /** First character of an AI query / AI reply text: what the assistant is asked to do. */
     public static final char AI_SUGGEST = 'S';
@@ -48,7 +59,7 @@ public final class ChatProtocol {
     public static boolean carriesBytes(byte type) {
         return type == TYPE_IMAGE || type == TYPE_FILE || type == TYPE_AUDIO || type == TYPE_PRIVATE
                 || type == TYPE_PRIVATE_AUDIO || type == TYPE_AUTH || type == TYPE_USER_PRESENCE || type == TYPE_USER_LIST
-                || type == TYPE_AI_REPLY;
+                || type == TYPE_AI_REPLY || type == TYPE_AVATAR;
     }
 
     public static byte[] encodeUserList(List<UserRecord> users) throws IOException {
@@ -57,7 +68,7 @@ public final class ChatProtocol {
             output.writeInt(users.size());
             for (UserRecord user : users) {
                 output.writeUTF(user.displayName);
-                output.writeBoolean(user.online);
+                output.writeByte(user.status);
             }
         }
         return bytes.toByteArray();
@@ -71,7 +82,7 @@ public final class ChatProtocol {
                 throw new IOException("Invalid user-list size.");
             }
             for (int i = 0; i < count; i++) {
-                users.add(new UserRecord(input.readUTF(), input.readBoolean()));
+                users.add(new UserRecord(input.readUTF(), input.readByte()));
             }
             if (input.available() != 0) {
                 throw new IOException("Unexpected trailing user-list data.");
@@ -99,11 +110,17 @@ public final class ChatProtocol {
 
     public static final class UserRecord {
         public final String displayName;
-        public final boolean online;
+        public final int status;      // one of the STATUS_* values
+        public final boolean online;  // anything except OFFLINE
+
+        public UserRecord(String displayName, int status) {
+            this.displayName = displayName;
+            this.status = status;
+            this.online = status != STATUS_OFFLINE;
+        }
 
         public UserRecord(String displayName, boolean online) {
-            this.displayName = displayName;
-            this.online = online;
+            this(displayName, online ? STATUS_ONLINE : STATUS_OFFLINE);
         }
     }
 }

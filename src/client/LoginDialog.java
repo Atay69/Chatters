@@ -68,13 +68,13 @@ final class LoginDialog {
 
         JLabel brand = new JLabel(AppInfo.NAME);
         brand.setForeground(ACCENT);
-        brand.setFont(new Font("SansSerif", Font.BOLD, 26));
+        brand.setFont(Theme.font(Font.BOLD, 26));
         title.setForeground(MUTED);
-        title.setFont(new Font("SansSerif", Font.BOLD, 12));
+        title.setFont(Theme.font(Font.BOLD, 12));
         status.setForeground(new Color(190, 195, 203));
-        connect.setFont(new Font("SansSerif", Font.BOLD, 14));
+        connect.setFont(Theme.font(Font.BOLD, 14));
         connect.setForeground(Color.WHITE);
-        connect.setBackgroundOverride(Theme.ACCENT); // the same green as the Send button
+        connect.setBackgroundOverride(Theme.accent()); // the same green as the Send button
         connect.setCorner(44);
         connect.setPreferredSize(new Dimension(300, 44));
         connect.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
@@ -103,11 +103,17 @@ final class LoginDialog {
         dialog.setIconImages(SharpIcon.windowIcons("/images/icon.png")); // our icon instead of the default Java one
         brand.setIcon(SharpIcon.fromResource("/images/icon.png", 44));
         brand.setIconTextGap(12);
+        // our own title bar on top instead of the Windows one
+        JPanel window = new JPanel(new java.awt.BorderLayout());
+        window.add(new TitleBar(dialog, AppInfo.NAME), java.awt.BorderLayout.NORTH);
+        window.add(base, java.awt.BorderLayout.CENTER);
+
+        dialog.setUndecorated(true);
         dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
-        dialog.setContentPane(base);
+        dialog.setContentPane(window);
         dialog.getRootPane().setDefaultButton(connect);
         dialog.setResizable(false);
-        dialog.setSize(380, 590);
+        dialog.setSize(380, 626);
         dialog.setLocationRelativeTo(null);
     }
 
@@ -168,7 +174,7 @@ final class LoginDialog {
     private static JLabel label(String text) {
         JLabel label = new JLabel(text);
         label.setForeground(MUTED);
-        label.setFont(new Font("SansSerif", Font.BOLD, 10));
+        label.setFont(Theme.font(Font.BOLD, 10));
         return label;
     }
 

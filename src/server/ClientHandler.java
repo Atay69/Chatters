@@ -27,13 +27,14 @@ import java.util.concurrent.RejectedExecutionException;
  */
 final class ClientHandler extends Thread {
     private static final int HANDSHAKE_TIMEOUT_MS = 15_000;
-    private static final int MAX_VOICE_BYTES = 8 * 1024 * 1024; // private voice messages are kept in memory
+    private static final int MAX_VOICE_BYTES = ChatProtocol.MAX_ATTACHMENT_BYTES;
 
     final Socket socket;
     private DataInputStream input;
     private volatile DataOutputStream output;
     volatile String displayName;
     volatile boolean ready; // true once the client is signed in and has its history
+    volatile int status = ChatProtocol.STATUS_ONLINE; // what this person chose to show (online, away, ...)
     private final List<Future<?>> aiTasks = new CopyOnWriteArrayList<Future<?>>();
 
     ClientHandler(Socket socket) {
@@ -43,8 +44,8 @@ final class ClientHandler extends Thread {
     @Override
     public void run() {
         try {
-            input = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
-            output = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
+            input = new DataInputStream(new BufferedInputStream(socket.getInputStream(), 1024 * 1024));
+            output = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream(), 1024 * 1024));
             if (signIn()) {
                 joinChat();
                 readMessages();
@@ -127,6 +128,7 @@ final class ClientHandler extends Thread {
     private void joinChat() {
         // Same lock as new messages, so no message can slip between the history and the live feed.
         synchronized (ChatServer.groupHistory) {
+            ChatServer.sendAvatars(this);
             ChatServer.sendGroupHistory(this);
             ChatServer.sendPrivateHistory(this);
             if (socket.isClosed()) {
@@ -157,6 +159,14 @@ final class ClientHandler extends Thread {
                 }
             } else if (type == ChatProtocol.TYPE_IMAGE || type == ChatProtocol.TYPE_FILE || type == ChatProtocol.TYPE_AUDIO) {
                 handleAttachment(type, time);
+            } else if (type == ChatProtocol.TYPE_STATUS) {
+                int chosen = input.readByte();
+                if (chosen >= ChatProtocol.STATUS_ONLINE && chosen <= ChatProtocol.STATUS_INVISIBLE) {
+                    status = chosen;
+                    ChatServer.broadcastUserList(); // everybody sees the new status
+                }
+            } else if (type == ChatProtocol.TYPE_AVATAR) {
+                handleAvatar(time);
             } else if (type == ChatProtocol.TYPE_AI_QUERY) {
                 handleAiQuery();
             }
@@ -245,6 +255,20 @@ final class ClientHandler extends Thread {
                 recipient.sendPacket(ChatProtocol.TYPE_PRIVATE_AUDIO, displayName, time, recipientAccount, wav);
             }
         }
+    }
+
+    /** A new profile picture: saved, then sent to everybody (the sender included, so it shows up everywhere). */
+    private void handleAvatar(String time) throws IOException {
+        int length = input.readInt();
+        if (length < 1 || length > ChatProtocol.MAX_AVATAR_BYTES) {
+            System.err.println("Rejected a profile picture of " + length + " bytes from " + displayName);
+            socket.close();
+            return;
+        }
+        byte[] png = new byte[length];
+        input.readFully(png);
+        ChatServer.saveAvatar(displayName, png);
+        ChatServer.broadcastPacket(ChatProtocol.TYPE_AVATAR, displayName, time, "", png);
     }
 
     /** An image, file or voice message for GroupChat. */

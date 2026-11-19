@@ -24,7 +24,7 @@ final class SharpIcon implements Icon {
         this.image = scaled(source, size * 2);
     }
 
-    /** A crisp icon from a picture in the project, e.g. "/images/File.png"; null if the picture is missing. */
+    /** A crisp icon from a picture in the project, e.g. "/images/icon.png"; null if the picture is missing. */
     static SharpIcon fromResource(String path, int size) {
         java.net.URL url = SharpIcon.class.getResource(path);
         try {

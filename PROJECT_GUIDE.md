@@ -57,7 +57,10 @@ chatter-data/ everything the server saves (created automatically)
 | `Widgets`, `Theme` | Small reusable pieces (glass card, bubble, buttons, panels), and all the colours (dark = black glass, light = white glass) |
 | `Emoji`, `EmojiPicker` | The emoji pictures, and the popup to pick one |
 | `WallpaperManager` | Wallpapers: cycle, add, soften |
-| `ProfileAvatar`, `SharpIcon`, `VoiceRecorder`, `Settings`, `ChatEntry` | avatar drawing · crisp icons · microphone · saved settings · one message |
+| `LineIcon` | The file, image, emoji, microphone and AI icons, drawn in code in the theme colour |
+| `StatusIcon` | The status symbols: green circle (online), white half moon (away), grey circle (invisible/offline), red circle with a line (do not disturb) |
+| `TitleBar` | Our own title bar (app icon, title, close button; drag it to move the window) |
+| `ProfileAvatar`, `SharpIcon`, `VoiceRecorder`, `Settings`, `ChatEntry` | avatar drawing (click yours in the sidebar to pick a picture; the server keeps it in `chatter-data/avatars/` and everybody sees it) · crisp icons · microphone · saved settings · one message |
 
 ### ai/ (your future AI)
 `AiAssistant` is the interface to implement (3 methods: reply suggestions, complete a sentence,
