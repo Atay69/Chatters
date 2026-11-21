@@ -86,7 +86,11 @@ public final class ChatProtocol {
     /** First character of an AI query / AI reply text: what the assistant is asked to do. */
     public static final char AI_SUGGEST = 'S';
     public static final char AI_COMPLETE = 'C';
-    public static final char AI_ASK = 'A';
+    public static final char AI_ASK = 'A';      // one-off question ("/ai ...", sparkle button); the answer is a notice
+    public static final char AI_CHAT = 'T';     // a message in the dedicated AI conversation; the answer is a chat message
+
+    /** The name of the dedicated AI conversation in the sidebar (it looks like a person, but it lives on the client). */
+    public static final String AI_NAME = "AI Assistant";
 
     private ChatProtocol() {
     }

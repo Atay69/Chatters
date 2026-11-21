@@ -32,7 +32,6 @@ final class Widgets {
 
     /** A label whose text colour follows the theme. */
     static class Label extends JLabel {
-        private static final long serialVersionUID = 1L;
         private Theme.Role role;
 
         Label(String text, Theme.Role role) {
@@ -56,7 +55,6 @@ final class Widgets {
      * gets a thin outline) or with thin lines on some sides (see {@link #edges(String)}).
      */
     static class TintedPanel extends JPanel {
-        private static final long serialVersionUID = 1L;
         private final Theme.Role fill;
         private final int corner;
         private String edges = "";
@@ -116,7 +114,6 @@ final class Widgets {
      * inside it to the rounded corners.
      */
     static class Glass extends JPanel {
-        private static final long serialVersionUID = 1L;
         private final int corner;
 
         Glass(LayoutManager layout, int corner) {
@@ -150,7 +147,6 @@ final class Widgets {
      * on the left for messages from others. Put the content inside with add().
      */
     static class Bubble extends JPanel {
-        private static final long serialVersionUID = 1L;
         private static final int TAIL = 9;
         private final Theme.Role fill;
         private final boolean tailRight;
@@ -197,7 +193,6 @@ final class Widgets {
      * (icon buttons). The text colour follows the theme.
      */
     static class Button extends JButton {
-        private static final long serialVersionUID = 1L;
         private final Theme.Role background;
         private Theme.Role textRole;
         private Color backgroundOverride;
@@ -297,7 +292,6 @@ final class Widgets {
      * (appear) and fade out while the list closes the gap when a message is deleted (disappear).
      */
     static class AnimatedRow extends JPanel {
-        private static final long serialVersionUID = 1L;
         private float alpha = 1f;          // 1 = fully visible
         private int offset;                // pixels the row is still below its final place
         private double heightFactor = 1;   // 1 = full height, 0 = no height left
@@ -358,8 +352,6 @@ final class Widgets {
 
     /** A message list that always has the width of the chat area (no sideways scrolling). */
     static class ListPanel extends JPanel implements Scrollable {
-        private static final long serialVersionUID = 1L;
-
         @Override
         public Dimension getPreferredScrollableViewportSize() {
             return getPreferredSize();
@@ -388,7 +380,6 @@ final class Widgets {
 
     /** The window background: a base colour, the soft wallpaper, and a light wash on top of it. */
     static class WallpaperPanel extends JPanel {
-        private static final long serialVersionUID = 1L;
         private final WallpaperManager wallpapers;
 
         WallpaperPanel(WallpaperManager wallpapers) {

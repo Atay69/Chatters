@@ -28,8 +28,6 @@ import java.util.function.Consumer;
 
 /** The left side: the "Messages" heading, the list of conversations, and your own profile card. */
 final class Sidebar extends Widgets.TintedPanel {
-    private static final long serialVersionUID = 1L;
-
     private final ChatClient client;
     private int myStatus = ChatProtocol.STATUS_ONLINE; // what I show to the others
     private final ConversationList conversations;
@@ -39,7 +37,7 @@ final class Sidebar extends Widgets.TintedPanel {
         this.client = client;
         edges("R");
         setPreferredSize(new Dimension(300, 0));
-        conversations = new ConversationList(username, open, previews);
+        conversations = new ConversationList(username, open, previews, client.aiAvailable());
 
         Widgets.Label heading = new Widgets.Label("Messages", Theme.Role.TEXT);
         heading.setFont(Theme.font(Font.PLAIN, 26));
@@ -111,8 +109,6 @@ final class Sidebar extends Widgets.TintedPanel {
     private JPanel profileCard(String username) {
         Animation.HoverFade[] fade = new Animation.HoverFade[1];  // glides to 1 while the mouse is over the card
         Widgets.TintedPanel card = new Widgets.TintedPanel(new BorderLayout(12, 0), Theme.Role.CONTROL, 26) {
-            private static final long serialVersionUID = 1L;
-
             @Override
             protected void paintComponent(Graphics graphics) {
                 super.paintComponent(graphics);

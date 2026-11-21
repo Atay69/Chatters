@@ -173,72 +173,76 @@ public final class ChatClient implements AutoCloseable {
         reader.start();
     }
 
-    public void sendText(String text, String recipient) throws IOException {
+    /** Writes one packet's bytes to the server. */
+    private interface Writer {
+        void write(DataOutputStream out) throws IOException;
+    }
+
+    /** Sends one packet: only one thread writes at a time (chat, uploads, ...), and the bytes are flushed at once. */
+    private void send(Writer writer) throws IOException {
         synchronized (output) {
-            if (recipient == null) {
-                output.writeByte(ChatProtocol.TYPE_TEXT);
-                output.writeUTF(text);
-            } else {
-                output.writeByte(ChatProtocol.TYPE_PRIVATE);
-                output.writeUTF(recipient);
-                output.writeUTF(text);
-            }
+            writer.write(output);
             output.flush();
         }
     }
 
-    public void sendFrame(ChatProtocol.Packet packet) throws IOException {
-        synchronized (output) {
-            output.writeByte(packet.type);
-            output.writeUTF(packet.sender);
-            output.writeUTF(packet.timestamp);
-            output.writeUTF(packet.metadata);
-            if (ChatProtocol.carriesBytes(packet.type)) {
-                output.writeInt(packet.data.length);
-                output.write(packet.data);
+    public void sendText(String text, String recipient) throws IOException {
+        send(out -> {
+            out.writeByte(recipient == null ? ChatProtocol.TYPE_TEXT : ChatProtocol.TYPE_PRIVATE);
+            if (recipient != null) {
+                out.writeUTF(recipient);
             }
-            output.flush();
-        }
+            out.writeUTF(text);
+        });
+    }
+
+    public void sendFrame(ChatProtocol.Packet packet) throws IOException {
+        send(out -> {
+            out.writeByte(packet.type);
+            out.writeUTF(packet.sender);
+            out.writeUTF(packet.timestamp);
+            out.writeUTF(packet.metadata);
+            if (ChatProtocol.carriesBytes(packet.type)) {
+                out.writeInt(packet.data.length);
+                out.write(packet.data);
+            }
+        });
     }
 
     /** Edits one of my text messages. {@code peer} is null for GroupChat, else the other person of the private chat. */
     public void editMessage(String peer, long id, String newText) throws IOException {
-        synchronized (output) {
-            output.writeByte(ChatProtocol.TYPE_MSG_EDIT);
-            output.writeUTF(peer == null ? "" : peer);
-            output.writeLong(id);
-            output.writeUTF(newText);
-            output.flush();
-        }
+        send(out -> {
+            out.writeByte(ChatProtocol.TYPE_MSG_EDIT);
+            out.writeUTF(peer == null ? "" : peer);
+            out.writeLong(id);
+            out.writeUTF(newText);
+        });
     }
 
     /** Deletes one of my messages for everybody. */
     public void deleteMessage(String peer, long id) throws IOException {
-        synchronized (output) {
-            output.writeByte(ChatProtocol.TYPE_MSG_DELETE);
-            output.writeUTF(peer == null ? "" : peer);
-            output.writeLong(id);
-            output.flush();
-        }
+        send(out -> {
+            out.writeByte(ChatProtocol.TYPE_MSG_DELETE);
+            out.writeUTF(peer == null ? "" : peer);
+            out.writeLong(id);
+        });
     }
 
     /** Tells everybody my status (a ChatProtocol.STATUS_* value). */
     public void sendStatus(int status) throws IOException {
-        synchronized (output) {
-            output.writeByte(ChatProtocol.TYPE_STATUS);
-            output.writeByte(status);
-            output.flush();
-        }
+        send(out -> {
+            out.writeByte(ChatProtocol.TYPE_STATUS);
+            out.writeByte(status);
+        });
     }
 
     /** Sets my profile picture (PNG bytes); the server shows it to everybody. */
     public void sendAvatar(byte[] png) throws IOException {
-        synchronized (output) {
-            output.writeByte(ChatProtocol.TYPE_AVATAR);
-            output.writeInt(png.length);
-            output.write(png);
-            output.flush();
-        }
+        send(out -> {
+            out.writeByte(ChatProtocol.TYPE_AVATAR);
+            out.writeInt(png.length);
+            out.write(png);
+        });
     }
 
     // ---------------------------------------------------------------- big files: upload, cancel, download
@@ -275,14 +279,13 @@ public final class ChatClient implements AutoCloseable {
         TransferListener report = listener == null ? IGNORE : listener;
         Thread uploader = new Thread(() -> {
             try (InputStream file = source) {
-                synchronized (output) {
-                    output.writeByte(ChatProtocol.TYPE_FILE_BEGIN);
-                    output.writeUTF(recipient == null ? "" : recipient);
-                    output.writeUTF(name);
-                    output.writeByte(kind);
-                    output.writeLong(size);
-                    output.flush();
-                }
+                send(out -> {
+                    out.writeByte(ChatProtocol.TYPE_FILE_BEGIN);
+                    out.writeUTF(recipient == null ? "" : recipient);
+                    out.writeUTF(name);
+                    out.writeByte(kind);
+                    out.writeLong(size);
+                });
                 byte[] chunk = new byte[ChatProtocol.FILE_CHUNK_BYTES];
                 long sent = 0;
                 long lastReport = 0;
@@ -291,12 +294,11 @@ public final class ChatClient implements AutoCloseable {
                     if (count < 0) {
                         throw new IOException("The file changed or ended during upload.");
                     }
-                    synchronized (output) { // one chunk at a time, so chat messages can slip in between
-                        output.writeByte(ChatProtocol.TYPE_FILE_CHUNK);
-                        output.writeInt(count);
-                        output.write(chunk, 0, count);
-                        output.flush();
-                    }
+                    send(out -> { // one chunk at a time, so chat messages can slip in between
+                        out.writeByte(ChatProtocol.TYPE_FILE_CHUNK);
+                        out.writeInt(count);
+                        out.write(chunk, 0, count);
+                    });
                     sent += count;
                     long now = System.nanoTime();
                     if (now - lastReport > 150_000_000L || sent == size) {
@@ -305,11 +307,10 @@ public final class ChatClient implements AutoCloseable {
                         SwingUtilities.invokeLater(() -> report.onProgress(done, size));
                     }
                 }
-                synchronized (output) {
-                    output.writeByte(ChatProtocol.TYPE_FILE_END);
-                    output.writeByte(upload.cancelled ? 0 : 1); // 0 tells the server to delete the unfinished file
-                    output.flush();
-                }
+                send(out -> {
+                    out.writeByte(ChatProtocol.TYPE_FILE_END);
+                    out.writeByte(upload.cancelled ? 0 : 1); // 0 tells the server to delete the unfinished file
+                });
                 SwingUtilities.invokeLater(upload.cancelled ? report::onCancelled : report::onComplete);
             } catch (IOException error) {
                 try {
@@ -365,12 +366,11 @@ public final class ChatClient implements AutoCloseable {
         long request = nextRequest.incrementAndGet();
         downloads.put(request, new Download(target, total, listener));
         try {
-            synchronized (output) {
-                output.writeByte(ChatProtocol.TYPE_FILE_GET);
-                output.writeLong(fileId);
-                output.writeLong(request);
-                output.flush();
-            }
+            send(out -> {
+                out.writeByte(ChatProtocol.TYPE_FILE_GET);
+                out.writeLong(fileId);
+                out.writeLong(request);
+            });
         } catch (IOException error) {
             downloads.remove(request);
             throw error;
@@ -435,11 +435,7 @@ public final class ChatClient implements AutoCloseable {
         }
         closed = true;
         try {
-            synchronized (output) {
-                output.writeByte(ChatProtocol.TYPE_TEXT);
-                output.writeUTF("/quit");
-                output.flush();
-            }
+            sendText("/quit", null);
         } catch (IOException ignored) {
             // Closing a failed or already disconnected socket is expected during shutdown.
         }

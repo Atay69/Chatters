@@ -358,8 +358,6 @@ final class MessageView {
 
     /** A row whose height is exactly its content, so rows never stretch. */
     private static final class Row extends JPanel {
-        private static final long serialVersionUID = 1L;
-
         Row(LayoutManager layout) {
             super(layout);
             setOpaque(false);

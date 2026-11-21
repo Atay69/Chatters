@@ -22,7 +22,6 @@ import javax.imageio.ImageIO;
  * status symbol (see StatusIcon).
  */
 public final class ProfileAvatar extends JLabel {
-    private static final long serialVersionUID = 1L;
     private static final Color BACKGROUND = new Color(150, 150, 156);
     private static final Color SILHOUETTE = new Color(245, 245, 247);
 

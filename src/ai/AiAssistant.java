@@ -3,28 +3,21 @@ package ai;
 import java.util.List;
 
 /**
- * ===========================  AI PLUG-IN POINT  ===========================
+ * The "brain" of the chat's AI. {@link GroqAssistant} is the one that is used; to plug in another
+ * one, implement this interface (public no-argument constructor) and start the server with
  *
- * The chat already knows how to ask an assistant for help; it just has no brain yet.
- * When your model is ready, implement this interface (template: MyAssistant.java) and
- * start the server with the VM option:
+ *     -Dchat.aiClass=your.package.YourAssistant
  *
- *     -Dchat.aiClass=ai.MyAssistant
- *
- * (IntelliJ: Run > Edit Configurations > Server > Modify options > Add VM options)
- *
- * What users get once an assistant is connected:
- *   - ask            : the "/ai question" command and the sparkles button
+ * What users get from it:
+ *   - ask            : the "AI Assistant" conversation, the "/ai question" command and the sparkle button
  *   - suggestReplies : clickable reply chips above the message box
  *   - completeText   : press TAB in the message box to continue your sentence
  *
- * Calls run on background threads, never on a network reader thread. Throw any
- * exception to signal failure; the chat keeps working.
- * ==========================================================================
+ * Calls run on background threads. Throw any exception to signal failure; the chat keeps working.
  */
 public interface AiAssistant {
 
-    /** false = the chat reports "AI not configured yet." instead of calling the methods below. */
+    /** false = the AI is switched off (e.g. no API key): the buttons stay hidden. */
     default boolean isAvailable() {
         return true;
     }

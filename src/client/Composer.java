@@ -41,7 +41,6 @@ import java.io.IOException;
  * Tab asks it to finish your sentence.
  */
 final class Composer extends Widgets.TintedPanel {
-    private static final long serialVersionUID = 1L;
     private static final int MAX_TEXT_CHARS = 60000;
 
     /** What the composer needs from the window around it. */
@@ -57,6 +56,9 @@ final class Composer extends Widgets.TintedPanel {
 
         /** Adds a local system line (not sent to anyone) to the open conversation. */
         void notice(String text);
+
+        /** Sends a message to the "AI Assistant" conversation (shows it and asks the AI). */
+        void askAi(String text) throws IOException;
     }
 
     private final Host host;
@@ -161,6 +163,13 @@ final class Composer extends Widgets.TintedPanel {
         status.setRole(error ? Theme.Role.ERROR : Theme.Role.MUTED);
     }
 
+    /** The AI conversation takes text only: no files, images or voice messages there. */
+    void setTextOnly(boolean textOnly) {
+        for (Widgets.Button tool : new Widgets.Button[] { attachButton, imageButton, recordButton }) {
+            tool.setEnabled(!textOnly);
+        }
+    }
+
     /** After the connection is lost: nothing can be sent any more. */
     void disableAll() {
         setBusy(true);
@@ -207,6 +216,8 @@ final class Composer extends Widgets.TintedPanel {
             if (editing != null) { // "Save": the text replaces the message that is being edited
                 host.client().editMessage(host.activePeer(), editing.id, text);
                 finishEditing();
+            } else if (ChatProtocol.AI_NAME.equals(host.activePeer())) {
+                host.askAi(text); // the AI conversation lives on the client; the server only answers
             } else {
                 host.client().sendText(text, host.activePeer());
             }
@@ -407,84 +418,43 @@ final class Composer extends Widgets.TintedPanel {
         input.setBorder(BorderFactory.createEmptyBorder(9, 4, 9, 6));
         input.getAccessibleContext().setAccessibleName("Message");
         input.addFocusListener(new FocusAdapter() { // the bar's outline turns accent-coloured while typing
-            @Override
-            public void focusGained(FocusEvent event) {
-                bar.setHighlighted(true);
-            }
-
-            @Override
-            public void focusLost(FocusEvent event) {
-                bar.setHighlighted(false);
-            }
+            @Override public void focusGained(FocusEvent event) { bar.setHighlighted(true); }
+            @Override public void focusLost(FocusEvent event) { bar.setHighlighted(false); }
         });
-        // Enter sends, Shift+Enter inserts a new line
-        input.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "cancelEdit");
-        input.getActionMap().put("cancelEdit", new AbstractAction() {
-            private static final long serialVersionUID = 1L;
-
-            @Override
-            public void actionPerformed(ActionEvent event) {
-                cancelEditing();
-            }
-        });
-        input.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "send");
-        input.getActionMap().put("send", new AbstractAction() {
-            private static final long serialVersionUID = 1L;
-
-            @Override
-            public void actionPerformed(ActionEvent event) {
-                sendText();
-            }
-        });
-        input.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, KeyEvent.SHIFT_DOWN_MASK), "newline");
-        input.getActionMap().put("newline", new AbstractAction() {
-            private static final long serialVersionUID = 1L;
-
-            @Override
-            public void actionPerformed(ActionEvent event) {
-                input.replaceSelection("\n");
-            }
-        });
+        // keys: Esc cancels an edit, Enter sends, Shift+Enter inserts a new line, Tab asks the AI to finish the sentence
+        bind(KeyEvent.VK_ESCAPE, 0, this::cancelEditing);
+        bind(KeyEvent.VK_ENTER, 0, this::sendText);
+        bind(KeyEvent.VK_ENTER, KeyEvent.SHIFT_DOWN_MASK, () -> input.replaceSelection("\n"));
         if (host.client().aiAvailable()) {
             input.setFocusTraversalKeysEnabled(false); // so that Tab is free for the assistant
-            input.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), "complete");
-            input.getActionMap().put("complete", new AbstractAction() {
-                private static final long serialVersionUID = 1L;
-
-                @Override
-                public void actionPerformed(ActionEvent event) {
-                    completeWithAi();
-                }
-            });
+            bind(KeyEvent.VK_TAB, 0, this::completeWithAi);
         }
         // the box grows with the text, up to 4 lines
+        Runnable resize = () -> {
+            input.setRows(Math.min(4, Math.max(1, input.getLineCount())));
+            input.revalidate();
+        };
         input.getDocument().addDocumentListener(new DocumentListener() {
-            private void resize() {
-                input.setRows(Math.min(4, Math.max(1, input.getLineCount())));
-                input.revalidate();
-            }
+            @Override public void insertUpdate(DocumentEvent event) { resize.run(); }
+            @Override public void removeUpdate(DocumentEvent event) { resize.run(); }
+            @Override public void changedUpdate(DocumentEvent event) { resize.run(); }
+        });
+    }
 
+    /** Makes a key press in the message box run {@code action}. */
+    private void bind(int key, int modifiers, Runnable action) {
+        String name = key + "/" + modifiers; // any unique name will do
+        input.getInputMap().put(KeyStroke.getKeyStroke(key, modifiers), name);
+        input.getActionMap().put(name, new AbstractAction() {
             @Override
-            public void insertUpdate(DocumentEvent event) {
-                resize();
-            }
-
-            @Override
-            public void removeUpdate(DocumentEvent event) {
-                resize();
-            }
-
-            @Override
-            public void changedUpdate(DocumentEvent event) {
-                resize();
+            public void actionPerformed(ActionEvent event) {
+                action.run();
             }
         });
     }
 
     /** The message box: transparent (the bar behind it is solid) and coloured by the theme. */
     private static final class InputArea extends JTextArea {
-        private static final long serialVersionUID = 1L;
-
         InputArea() {
             super(1, 24);
             setOpaque(false);

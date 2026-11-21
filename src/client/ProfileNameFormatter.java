@@ -10,6 +10,9 @@ public final class ProfileNameFormatter {
         if (name == null || name.trim().isEmpty()) {
             return "";
         }
+        if (name.equals(shared.ChatProtocol.AI_NAME)) {
+            return name; // keep "AI" in capitals
+        }
         StringBuilder formatted = new StringBuilder(name.length());
         boolean capitalizeNext = true;
         for (int offset = 0; offset < name.length();) {

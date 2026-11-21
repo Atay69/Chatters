@@ -50,8 +50,6 @@ final class Appearance {
     /** The burger button (three lines in an outlined square) that opens the menu. */
     JComponent menuButton() {
         Widgets.Button button = new Widgets.Button("", Theme.Role.CONTROL, Theme.Role.TEXT) {
-            private static final long serialVersionUID = 1L;
-
             @Override
             protected void paintComponent(Graphics graphics) {
                 super.paintComponent(graphics);

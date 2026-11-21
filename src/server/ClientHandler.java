@@ -16,6 +16,8 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -45,6 +47,7 @@ final class ClientHandler extends Thread {
     volatile boolean ready; // true once the client is signed in and has its history
     volatile int status = ChatProtocol.STATUS_ONLINE; // what this person chose to show (online, away, ...)
     private final List<Future<?>> aiTasks = new CopyOnWriteArrayList<Future<?>>();
+    private final List<String> aiChat = Collections.synchronizedList(new ArrayList<String>()); // this client's talk with the AI ("name: text")
 
     ClientHandler(Socket socket) {
         this.socket = socket;
@@ -211,7 +214,7 @@ final class ClientHandler extends Thread {
             try {
             id = ChatServer.persistGroupMessage(ChatProtocol.TYPE_TEXT, displayName, time, text, new byte[0]);
             } catch (IOException error) {
-                sendPacket(ChatProtocol.TYPE_TRANSFER_STATUS, "SYSTEM", time, "Message was not sent: " + error.getMessage(), new byte[0]);
+                sendStatus("Message was not sent: " + error.getMessage());
                 return;
             }
             System.out.println(time + " " + displayName + " : " + (text.startsWith(ChatProtocol.FILE_MARK) ? "[file]" : text));
@@ -223,12 +226,12 @@ final class ClientHandler extends Thread {
         String recipientName = input.readUTF();
         String text = input.readUTF();
         if (recipientName.equalsIgnoreCase(displayName) || text.length() > 60000) {
-            sendPacket(ChatProtocol.TYPE_TRANSFER_STATUS, "SYSTEM", time, "Private message could not be sent.", new byte[0]);
+            sendStatus("Private message could not be sent.");
             return;
         }
         String recipientAccount = ChatServer.canonicalUser(recipientName);
         if (recipientAccount == null) {
-            sendPacket(ChatProtocol.TYPE_TRANSFER_STATUS, "SYSTEM", time, "Unknown user: " + recipientName, new byte[0]);
+            sendStatus("Unknown user: " + recipientName);
             return;
         }
         postPrivate(time, recipientAccount, text);
@@ -241,7 +244,7 @@ final class ClientHandler extends Thread {
             try {
                 saved = ChatServer.privateHistory.add(displayName, recipientAccount, time, text);
             } catch (IOException error) {
-                sendPacket(ChatProtocol.TYPE_TRANSFER_STATUS, "SYSTEM", time, "Message was not sent: " + error.getMessage(), new byte[0]);
+                sendStatus("Message was not sent: " + error.getMessage());
                 return;
             }
             byte[] message = text.getBytes(StandardCharsets.UTF_8);
@@ -527,19 +530,29 @@ final class ClientHandler extends Thread {
         }
     }
 
-    /** Runs the request in the background (see the ai package) and sends the answer to this client only. */
+    /**
+     * Runs the request in the background (see the ai package) and sends the answer to this client only.
+     * Kinds: SUGGEST / COMPLETE / ASK as before, and CHAT for the "AI Assistant" conversation, whose
+     * memory is {@link #aiChat} (this client's talk with the AI) instead of a stored chat.
+     */
     private void submitAi(char kind, String conversation, String text) {
         AiService.Kind aiKind = kind == ChatProtocol.AI_SUGGEST ? AiService.Kind.SUGGEST
-                : kind == ChatProtocol.AI_COMPLETE ? AiService.Kind.COMPLETE
-                : kind == ChatProtocol.AI_ASK ? AiService.Kind.ASK : null;
-        if (aiKind == null || (aiKind != AiService.Kind.ASK && !AiService.isAvailable())) {
+                : kind == ChatProtocol.AI_COMPLETE ? AiService.Kind.COMPLETE : AiService.Kind.ASK;
+        if (aiKind != AiService.Kind.ASK && !AiService.isAvailable()) {
             return;
         }
-        AiContext context = new AiContext(displayName, conversation, text, ChatServer.recentMessages(displayName, conversation, 20));
+        boolean chat = kind == ChatProtocol.AI_CHAT;
+        List<String> recent = chat ? new ArrayList<String>(aiChat) : ChatServer.recentMessages(displayName, conversation, 20);
+        AiContext context = new AiContext(displayName, conversation, text, recent.subList(Math.max(0, recent.size() - 20), recent.size()));
         try {
             aiTasks.removeIf(Future::isDone);
-            aiTasks.add(AiService.request(aiKind, context,
-                    result -> sendPacket(Frames.aiReply(kind, result, ChatServer.getTimestamp())), () -> { }));
+            aiTasks.add(AiService.request(aiKind, context, result -> {
+                if (chat) { // remember both sides for the next question
+                    aiChat.add(displayName + ": " + text);
+                    aiChat.add("AI: " + result);
+                }
+                sendPacket(Frames.aiReply(kind, result, ChatServer.getTimestamp()));
+            }, () -> { }));
         } catch (RejectedExecutionException busy) {
             if (aiKind == AiService.Kind.ASK) {
                 sendPacket(ChatProtocol.TYPE_SYSTEM, "SYSTEM", ChatServer.getTimestamp(), "AI is busy; please try again shortly.", new byte[0]);

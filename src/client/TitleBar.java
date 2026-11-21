@@ -28,7 +28,6 @@ import java.awt.event.WindowEvent;
  * Drag the bar to move the window.
  */
 final class TitleBar extends Widgets.TintedPanel {
-    private static final long serialVersionUID = 1L;
     private static final int BAR_HEIGHT = 36;
     private static final int CIRCLE = 22; // diameter of the round buttons
 
@@ -87,7 +86,6 @@ final class TitleBar extends Widgets.TintedPanel {
 
     /** One small button of the bar; it draws its own symbol and runs {@code action} when clicked. */
     private static final class TitleButton extends JButton {
-        private static final long serialVersionUID = 1L;
         private final Kind kind;
         private final Animation.HoverFade fade = new Animation.HoverFade(this);
 

@@ -131,7 +131,66 @@ It is updated every time we change something (the day-by-day history is in `DEVE
 
 ---
 
-## 15. What was simplified (organisation changes)
+## 15. The AI assistant
+
+* **Files:** `src/ai/` (`AiAssistant`, `AiContext`, `AiService`, `GroqAssistant`), `ClientHandler.submitAi` (server), and `ChatWindow`, `Composer`, `ConversationList` (client).
+* **Brain:** `GroqAssistant`, which calls Groq's free hosted models. It is the default: no start-up option is needed, only the key.
+
+### Three ways to use it
+| Where | What happens |
+|---|---|
+| **"AI Assistant" row in the sidebar** (right under GroupChat) | A private-style chat with the AI. Your messages are on the right, its answers on the left like a person. The AI remembers the last 20 lines of the talk. |
+| `/ai question` or `@ai question` in any chat, or the sparkle button | One-off question; the answer appears as a grey notice line in that chat. |
+| Reply chips above the box, and TAB in the message box | Three suggested replies to the last message; TAB finishes your sentence. |
+
+### How the "AI Assistant" conversation works
+```
+ you type in the AI chat                         server                       Groq
+   Composer.sendText ─► ChatWindow.askAi ─► TYPE_AI_QUERY ('T') ─► ClientHandler.submitAi ─► GroqAssistant.ask
+        (shows your message at once)                                         │ answer
+   ChatWindow.showAiReply ◄─ TYPE_AI_REPLY ('T') ◄──────────────────────────┘
+        (shows it as a message from "AI Assistant")
+```
+* The AI chat is **not a real user**: it is a name constant (`ChatProtocol.AI_NAME`) that `ConversationList` shows as a row and `ChatWindow` stores like a private chat (`privateEntries`). Nothing is saved in `private-messages.bin`.
+* **Memory:** the server keeps this client's talk in `ClientHandler.aiChat` (lines `name: text`) and sends the last 20 to the AI with each question. It lasts as long as you stay connected; messages are not kept after you close the window.
+* Text only: the file, image and voice buttons are switched off there (`Composer.setTextOnly`). You cannot edit or delete these messages (they have no server id).
+* The row appears only when the server has an AI key (`ChatClient.aiAvailable`).
+
+### The flow of the other features (`/ai`, sparkle, chips, TAB)
+`Composer` ─► `TYPE_AI_QUERY` (kind `A`, `S` or `C`) ─► `ClientHandler.submitAi` ─► `AiService` (background thread, profanity filter) ─► `AiAssistant` ─► `TYPE_AI_REPLY` back to the same client. Errors become "The assistant failed: …"; the server never crashes. The packet kinds are listed in `ChatProtocol` (`AI_SUGGEST`, `AI_COMPLETE`, `AI_ASK`, `AI_CHAT`).
+
+### Turning it on (server computer only)
+1. Free account at `console.groq.com` → **API Keys → Create API Key**.
+2. IntelliJ → **Run → Edit Configurations → Server → Environment variables:** `GROQ_API_KEY=your-key`. Never put the key in a source file (it would end up in git).
+3. Run the **Server** configuration (not "Current File"; it has no variables). Restart the client.
+* No key = the AI row and all AI buttons are hidden, and `/ai` answers "AI not configured yet."
+
+### How `GroqAssistant` works inside (every step is commented in the file)
+1. Each method builds a short **prompt** (recent chat + the job).
+2. `callGroq` writes a small JSON body (`model`, `max_tokens`, `reasoning_effort`, `messages`) and POSTs it to `https://api.groq.com/openai/v1/chat/completions` with `Authorization: Bearer <key>`.
+3. Groq answers `{"choices":[{"message":{"content":"…"}}]}`; `extractText` reads the text. `quote` / `extractText` are the only JSON code (no library).
+
+### Things you may want to change (top of `GroqAssistant.java`)
+* `MODEL` – **Groq retires model names now and then** (`API error 404 model_not_found`). Current list: `https://console.groq.com/docs/models`, or `GET https://api.groq.com/openai/v1/models` with your key. Now: `openai/gpt-oss-20b` (fast) / `openai/gpt-oss-120b` (smarter).
+* `SYSTEM` – the AI's personality ("answer in Spanish", "be funny" …).
+* `maxTokens` per method (800 / 400 / 300): the thinking of these models counts toward it, so keep it generous.
+* How many lines of memory the AI gets: the `20` in `ClientHandler.submitAi`.
+
+### Using a different brain
+Implement `AiAssistant` (3 methods, public no-argument constructor) and start the server with the VM option `-Dchat.aiClass=your.package.YourClass`.
+
+### Troubleshooting
+| Symptom | Cause |
+|---|---|
+| No "AI Assistant" row, no sparkle | `GROQ_API_KEY` not set for the **Server** run configuration, or the server was not restarted |
+| `API error 401` | wrong key |
+| `API error 404 model_not_found` | Groq renamed the model: change `MODEL` |
+| `API error 429` | free limit reached: wait a minute |
+| `timed out` | no internet or Groq is slow (30 s limit) |
+
+---
+
+## 16. What was simplified (organisation changes)
 
 * `ChatWindow` used to do everything (about 630 lines). It now only owns the **conversations and packets** (about 490 lines). Two new small classes took over:
   * **`Appearance`** – theme, accent colour, wallpaper and the burger menu.
@@ -139,3 +198,8 @@ It is updated every time we change something (the day-by-day history is in `DEVE
 * **One file window for everything** (`NativeFileDialog`): the four copies of "open a Java FileDialog and filter pictures" are gone.
 * Removed dead code (an unused "remember token" stub in `UserStore`).
 * Every class has a comment at its top saying what it is for.
+* **Code-only clean-up (nothing visual changed):**
+  * `ChatClient.send(...)` is the one place that writes a packet (lock + flush); the eight copies of that code are gone.
+  * `Composer.bind(...)` turns a key into an action in one line (Esc, Enter, Shift+Enter, Tab); the four separate key-handler classes are gone.
+  * The repeated "tell the client it failed" packets in `ClientHandler` all use `sendStatus(...)`.
+  * The unused `serialVersionUID` lines were removed, and the three extra AI classes (`NoAssistant`, `MyAssistant`, `ClaudeAssistant`) were deleted.

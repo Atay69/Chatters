@@ -24,12 +24,10 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * The "Messages" list: GroupChat first, then everybody else (online people first). Each row shows
+ * The "Messages" list: GroupChat first, then the AI Assistant, then everybody else (online people first). Each row shows
  * the picture, the name, the last message and its time. Clicking a row opens that conversation.
  */
 final class ConversationList extends JPanel {
-    private static final long serialVersionUID = 1L;
-
     /** What the list shows besides the names ({@code peer} == null means GroupChat). */
     interface Previews {
         /** The last message of the conversation, or null when there is none. */
@@ -42,11 +40,13 @@ final class ConversationList extends JPanel {
     private final String self;
     private final Consumer<String> onPick; // called with the person's name, or null for GroupChat
     private final Previews previews;
+    private final boolean withAi; // show the "AI Assistant" conversation below GroupChat
 
-    ConversationList(String self, Consumer<String> onPick, Previews previews) {
+    ConversationList(String self, Consumer<String> onPick, Previews previews, boolean withAi) {
         this.self = self;
         this.onPick = onPick;
         this.previews = previews;
+        this.withAi = withAi;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setOpaque(false);
     }
@@ -55,6 +55,9 @@ final class ConversationList extends JPanel {
     void update(Map<String, Integer> users, String selected) {
         removeAll();
         add(row(null, null, selected == null));
+        if (withAi) { // the AI is always online and sits right below GroupChat
+            add(row(ChatProtocol.AI_NAME, ChatProtocol.STATUS_ONLINE, ChatProtocol.AI_NAME.equalsIgnoreCase(selected)));
+        }
         for (boolean online : new boolean[] { true, false }) {
             for (Map.Entry<String, Integer> user : users.entrySet()) {
                 if ((user.getValue() != ChatProtocol.STATUS_OFFLINE) == online && !user.getKey().equalsIgnoreCase(self)) {
@@ -69,8 +72,6 @@ final class ConversationList extends JPanel {
     private JComponent row(String peer, Integer status, boolean selected) {
         Animation.HoverFade[] fade = new Animation.HoverFade[1]; // created below, once the row exists
         JPanel row = new JPanel(new BorderLayout(12, 0)) {
-            private static final long serialVersionUID = 1L;
-
             @Override
             protected void paintComponent(Graphics graphics) {
                 if (selected || fade[0].level() > 0) {
@@ -140,8 +141,6 @@ final class ConversationList extends JPanel {
 
     /** A small green pill with "+1" ... "+9" (more than nine still shows "+9"). */
     private static final class Badge extends JLabel {
-        private static final long serialVersionUID = 1L;
-
         Badge(int count) {
             super("+" + Math.min(count, 9), CENTER);
             setFont(Theme.font(Font.BOLD, 10));

@@ -246,6 +246,7 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
     private void showConversation() {
         composer.cancelEditing(); // an unfinished edit belongs to the conversation you are leaving
         composer.clearSuggestions();
+        composer.setTextOnly(isAi(activePeer));
         messages.setShowNames(activePeer == null);
         refreshPeople();
         refreshMessages();
@@ -260,12 +261,21 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
             long online = people.values().stream().filter(status -> status != ChatProtocol.STATUS_OFFLINE).count();
             subtitle.setText(online + " online · " + people.size() + " members");
         } else {
-            subtitle.setText(StatusIcon.name(people.getOrDefault(activePeer, ChatProtocol.STATUS_OFFLINE)));
+            subtitle.setText(StatusIcon.name(statusOf(activePeer)));
         }
         headerPicture.removeAll();
-        headerPicture.add(group ? ProfileAvatar.group(44) : new ProfileAvatar(activePeer, 44).showStatus(people.get(activePeer)));
+        headerPicture.add(group ? ProfileAvatar.group(44) : new ProfileAvatar(activePeer, 44).showStatus(statusOf(activePeer)));
         headerPicture.revalidate();
         headerPicture.repaint();
+    }
+
+    /** The AI conversation is not a person on the server: it is always online. */
+    private static boolean isAi(String peer) {
+        return ChatProtocol.AI_NAME.equals(peer);
+    }
+
+    private int statusOf(String peer) {
+        return isAi(peer) ? ChatProtocol.STATUS_ONLINE : people.getOrDefault(peer, ChatProtocol.STATUS_OFFLINE);
     }
 
     private void refreshMessages() {
@@ -279,7 +289,7 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         }
         List<ChatEntry> entries = privateEntries.get(activePeer.toLowerCase(Locale.ROOT));
         if (entries == null || entries.isEmpty()) {
-            messages.addNote("Start a private conversation with " + ProfileNameFormatter.format(activePeer) + ".");
+            messages.addNote(isAi(activePeer) ? "Ask the AI anything." : "Start a private conversation with " + ProfileNameFormatter.format(activePeer) + ".");
             return;
         }
         for (ChatEntry entry : entries) {
@@ -321,7 +331,7 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         }
         messages.add(entry, live); // live messages slide in; the saved history just appears
         boolean chatText = entry.type == ChatProtocol.TYPE_TEXT || entry.type == ChatProtocol.TYPE_PRIVATE;
-        if (aiAvailable && live && chatText && fromOthers) {
+        if (aiAvailable && live && chatText && fromOthers && !isAi(peer)) {
             composer.requestSuggestions(); // the AI may offer reply suggestions
         }
     }
@@ -352,7 +362,7 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         } else if (type == ChatProtocol.TYPE_MSG_DELETED) {
             applyDelete(packet);
         } else if (type == ChatProtocol.TYPE_AI_REPLY) {
-            showAiReply(packet.metadata);
+            showAiReply(packet);
         } else if (type == ChatProtocol.TYPE_TRANSFER_STATUS) {
             composer.showStatus(packet.metadata, false);
         } else if (type == ChatProtocol.TYPE_PRIVATE) {
@@ -370,14 +380,17 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
         }
     }
 
-    /** An answer from the AI assistant: the first character says what it is, the rest is the text. */
-    private void showAiReply(String metadata) {
+    /** An answer from the AI assistant: the first character of the metadata says what it is, the rest is the text. */
+    private void showAiReply(ChatProtocol.Packet packet) {
+        String metadata = packet.metadata;
         char kind = metadata.isEmpty() ? ChatProtocol.AI_ASK : metadata.charAt(0);
         String text = metadata.isEmpty() ? "" : metadata.substring(1);
         if (kind == ChatProtocol.AI_SUGGEST) {
             composer.showSuggestions(text.split("\n"));
         } else if (kind == ChatProtocol.AI_COMPLETE) {
             composer.append(text);
+        } else if (kind == ChatProtocol.AI_CHAT) { // a message from the AI in its own conversation
+            receive(new ChatEntry(ChatProtocol.AI_NAME, packet.timestamp, text, ChatProtocol.TYPE_PRIVATE, new byte[0]), ChatProtocol.AI_NAME);
         } else {
             notice(text);
         }
@@ -482,8 +495,19 @@ public class ChatWindow implements Composer.Host, ConversationList.Previews {
 
     @Override
     public void notice(String text) {
-        String now = "(" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")) + ")";
-        receive(new ChatEntry("SYSTEM", now, text, ChatProtocol.TYPE_SYSTEM, new byte[0]), activePeer);
+        receive(new ChatEntry("SYSTEM", now(), text, ChatProtocol.TYPE_SYSTEM, new byte[0]), activePeer);
+    }
+
+    /** Shows my message in the AI conversation and sends it to the server, which asks the AI. */
+    @Override
+    public void askAi(String text) throws IOException {
+        receive(new ChatEntry(username, now(), text, ChatProtocol.TYPE_PRIVATE, new byte[0]), ChatProtocol.AI_NAME);
+        client.sendAiQuery(ChatProtocol.AI_CHAT, ChatProtocol.AI_NAME, text);
+    }
+
+    /** The current time in the format the server uses for messages. */
+    private static String now() {
+        return "(" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")) + ")";
     }
 
     /** Shows a progress or error line above the message box. */
